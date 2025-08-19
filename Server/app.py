@@ -136,13 +136,14 @@ Start your analysis now, thinking through each step carefully.
 
     # TEMPERATURE UPDATE: Optimized for logical reasoning
     # Temperature 0.25 = More focused reasoning while maintaining creativity
+    # TOP P UPDATE: 0.9 = Broader vocabulary for comprehensive analysis
     generate_content_config = types.GenerateContentConfig(
         temperature=0.25,  # Updated: Enhanced logical reasoning
-        top_p=0.8,
+        top_p=0.9,  # Updated: Expanded token selection for detailed analysis
         max_output_tokens=2500
     )
     
-    print(f"🌡️ TEMPERATURE: 0.25 (Logical reasoning mode)")
+    print(f"🌡️ TEMPERATURE: 0.25 | TOP P: 0.9 (Logical reasoning mode)")
     
     contents = [types.Content(role="user", parts=[types.Part(text=cot_prompt)])]
 
@@ -262,13 +263,15 @@ Adapt your entire response tone, focus, and recommendations to match the current
 """
 
     # TEMPERATURE: Dynamic adaptation based on market conditions
+    # TOP P: Adaptive based on market volatility
+    top_p_value = 0.95 if context.get("market_condition") == "near_low" else 0.85
     generate_content_config = types.GenerateContentConfig(
         temperature=temperature,  # 0.2 (cautious) | 0.4 (opportunistic) | 0.3 (balanced)
-        top_p=0.8,
+        top_p=top_p_value,  # Updated: 0.95 (opportunistic) | 0.85 (cautious/balanced)
         max_output_tokens=2000
     )
     
-    print(f"🌡️ TEMPERATURE: {temperature} ({tone.split(' - ')[0].lower()} mode)")
+    print(f"🌡️ TEMPERATURE: {temperature} | TOP P: {top_p_value} ({tone.split(' - ')[0].lower()} mode)")
     
     contents = [types.Content(role="user", parts=[types.Part(text=dynamic_prompt)])]
 
@@ -388,13 +391,14 @@ Based on the examples above, provide analysis matching the appropriate tone (bul
 
     # TEMPERATURE UPDATE: Optimized for contextual adaptation
     # Temperature 0.35 = Better balance for nuanced responses
+    # TOP P UPDATE: 0.88 = Balanced vocabulary for example-based learning
     generate_content_config = types.GenerateContentConfig(
         temperature=0.35,  # Updated: Enhanced contextual responses
-        top_p=0.8,
+        top_p=0.88,  # Updated: Optimized for multi-shot learning
         max_output_tokens=1800
     )
     
-    print(f"🌡️ TEMPERATURE: 0.35 (Contextual adaptation mode)")
+    print(f"🌡️ TEMPERATURE: 0.35 | TOP P: 0.88 (Contextual adaptation mode)")
     
     contents = [types.Content(role="user", parts=[types.Part(text=multi_shot_prompt)])]
 
@@ -486,13 +490,14 @@ Provide analysis in the EXACT same format as the example above.
 
     # TEMPERATURE UPDATE: Optimized for format consistency
     # Temperature 0.15 = More consistent format following
+    # TOP P UPDATE: 0.75 = Focused vocabulary for consistent formatting
     generate_content_config = types.GenerateContentConfig(
         temperature=0.15,  # Updated: Enhanced format consistency
-        top_p=0.7,
+        top_p=0.75,  # Updated: Tighter control for format adherence
         max_output_tokens=1500
     )
     
-    print(f"🌡️ TEMPERATURE: 0.15 (Format consistency mode)")
+    print(f"🌡️ TEMPERATURE: 0.15 | TOP P: 0.75 (Format consistency mode)")
     
     contents = [types.Content(role="user", parts=[types.Part(text=one_shot_prompt)])]
 
@@ -558,14 +563,20 @@ def health_check():
             "multi_shot": 0.35,
             "one_shot": 0.15
         },
-        "optimization": "Temperature settings optimized for each prompting method"
+        "top_p_settings": {
+            "chain_of_thought": 0.9,
+            "dynamic_analysis": "0.85-0.95 (adaptive)",
+            "multi_shot": 0.88,
+            "one_shot": 0.75
+        },
+        "optimization": "Temperature and Top P settings optimized for each prompting method"
     })
 
 if __name__ == "__main__":
-    print("🌡️ SAYTRIX AI - TEMPERATURE OPTIMIZED VERSION")
-    print("📊 Chain of Thought: 0.25 (Logical reasoning)")
-    print("🔄 Dynamic Analysis: 0.2-0.4 (Adaptive)")
-    print("📈 Multi-Shot: 0.35 (Contextual adaptation)")
-    print("🎯 One-Shot: 0.15 (Format consistency)")
+    print("🌡️ SAYTRIX AI - TEMPERATURE & TOP P OPTIMIZED VERSION")
+    print("📊 Chain of Thought: Temp 0.25 | Top P 0.9 (Logical reasoning)")
+    print("🔄 Dynamic Analysis: Temp 0.2-0.4 | Top P 0.85-0.95 (Adaptive)")
+    print("📈 Multi-Shot: Temp 0.35 | Top P 0.88 (Contextual adaptation)")
+    print("🎯 One-Shot: Temp 0.15 | Top P 0.75 (Format consistency)")
     print("=" * 50)
     app.run(debug=True, host="0.0.0.0", port=5000)
