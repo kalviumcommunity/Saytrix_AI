@@ -198,6 +198,110 @@ Provide analysis that adapts to the current market condition, query focus, and r
 
     return base_prompt + prompt_focus + tone_instruction + complexity_instruction + format_instruction
 
+@app.route("/chain-of-thought-analysis", methods=["POST"])
+def chain_of_thought_analysis():
+    """Chain of Thought Prompting - Step-by-step reasoning for stock analysis"""
+    data = request.get_json(force=True)
+    symbol = data.get("symbol")
+    query = data.get("query", "Should I invest in this stock?")
+
+    if not symbol:
+        return jsonify({"error": "Missing 'symbol' in request."}), 400
+
+    context = get_stock_context(symbol)
+    if "error" in context:
+        return jsonify({"error": context["error"]}), 500
+
+    # CHAIN OF THOUGHT PROMPTING IMPLEMENTATION
+    # Forces AI to show step-by-step reasoning process
+    
+    cot_prompt = f"""
+You are Saytrix AI, a financial analyst. Analyze {symbol} using CHAIN OF THOUGHT reasoning.
+
+**STOCK DATA:**
+- Symbol: {symbol}
+- Current Price: ₹{context.get('current_price')}
+- 52W High: ₹{context.get('high_52')}
+- 52W Low: ₹{context.get('low_52')}
+- P/E Ratio: {context.get('pe_ratio')}
+- Recent Change: {context.get('price_change')}%
+- Market Position: {context.get('market_condition')}
+
+**USER QUESTION:** "{query}"
+
+**INSTRUCTIONS:** Show your complete reasoning process step-by-step. Think through each aspect systematically.
+
+**CHAIN OF THOUGHT ANALYSIS:**
+
+🧠 **STEP 1: DATA INTERPRETATION**
+Let me first understand what the numbers tell us:
+- Current price vs 52W range analysis
+- P/E ratio evaluation
+- Recent price movement assessment
+- Market position implications
+
+📈 **STEP 2: TECHNICAL REASONING**
+Now I'll analyze the technical aspects:
+- Where is the stock in its trading range?
+- What does the recent price change indicate?
+- Is this a good entry/exit point technically?
+- What are the key support/resistance levels?
+
+💰 **STEP 3: FUNDAMENTAL REASONING**
+Next, let me evaluate the fundamentals:
+- Is the P/E ratio reasonable for this stock?
+- How does it compare to industry averages?
+- What does the valuation suggest?
+- Are there any red flags in the metrics?
+
+⚠️ **STEP 4: RISK ASSESSMENT**
+Now I need to consider the risks:
+- What risks does the current market position present?
+- How volatile has the stock been?
+- What external factors could affect it?
+- What's the risk-reward ratio?
+
+🎯 **STEP 5: LOGICAL CONCLUSION**
+Based on my step-by-step analysis:
+- Weighing all the factors I've considered
+- Connecting the technical and fundamental insights
+- Considering the risk-reward balance
+- Arriving at a logical recommendation
+
+**IMPORTANT:** Show your reasoning for each step. Explain WHY you reach each conclusion. Connect each step to the next logically.
+
+Start your analysis now, thinking through each step carefully and showing your complete thought process.
+"""
+
+    generate_content_config = types.GenerateContentConfig(
+        temperature=0.3,  # Balanced for logical reasoning
+        top_p=0.8,
+        max_output_tokens=2500  # More space for detailed reasoning
+    )
+    
+    contents = [types.Content(role="user", parts=[types.Part(text=cot_prompt)])]
+
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-pro",
+            contents=contents,
+            config=generate_content_config
+        )
+        response_text = response.output_text if response.output_text else ""
+        
+        return jsonify({
+            "result": response_text,
+            "method": "chain-of-thought",
+            "reasoning_steps": 5,
+            "context": {
+                "symbol": symbol,
+                "market_condition": context.get("market_condition"),
+                "analysis_type": "step-by-step reasoning"
+            }
+        })
+    except Exception as e:
+        return jsonify({"result": "", "error": str(e)}), 500
+
 @app.route("/dynamic-analysis", methods=["POST"])
 def dynamic_analysis():
     """Dynamic Prompting - Adapts to market conditions and query type"""
@@ -213,9 +317,6 @@ def dynamic_analysis():
     if "error" in context:
         return jsonify({"error": context["error"]}), 500
 
-    # DYNAMIC PROMPTING IMPLEMENTATION
-    # Prompt adapts based on: market condition + query type + user level
-    
     # Detect query focus
     if any(word in query.lower() for word in ["technical", "chart", "support", "resistance"]):
         focus = "technical"
@@ -228,16 +329,15 @@ def dynamic_analysis():
 
     # Adaptive temperature based on market condition
     if context.get("market_condition") == "near_high":
-        temperature = 0.2  # Conservative
+        temperature = 0.2
         tone = "CAUTIOUS - Stock near 52W high, emphasize risk management"
     elif context.get("market_condition") == "near_low":
-        temperature = 0.4  # Opportunistic
+        temperature = 0.4
         tone = "OPPORTUNISTIC - Stock near 52W low, assess value opportunity"
     else:
-        temperature = 0.3  # Balanced
+        temperature = 0.3
         tone = "BALANCED - Stock in mid-range, provide neutral analysis"
 
-    # Dynamic prompt construction
     dynamic_prompt = f"""
 You are Saytrix AI. Analyze {symbol} with DYNAMIC adaptation:
 
