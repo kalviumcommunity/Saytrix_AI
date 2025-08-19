@@ -36,6 +36,82 @@ Technical indicators: [RSI, MACD, etc.]
     except Exception as e:
         return f"Could not fetch stock data for {symbol}. Error: {str(e)}"
 
+@app.route("/one-shot-analysis", methods=["POST"])
+def one_shot_analysis():
+    """One-Shot Prompting Implementation for Stock Analysis"""
+    data = request.get_json(force=True)
+    symbol = data.get("symbol")
+    query = data.get("query", "Analyze this stock")
+
+    if not symbol:
+        return jsonify({"error": "Missing 'symbol' in request."}), 400
+
+    rag_context = get_stock_context(symbol)
+
+    # ONE-SHOT PROMPTING IMPLEMENTATION
+    # Providing a single, comprehensive example to guide the AI's response format
+    
+    one_shot_prompt = f"""
+You are Saytrix AI, a financial analyst. Analyze stocks using this EXACT format:
+
+**EXAMPLE ANALYSIS:**
+User Query: "Should I invest in RELIANCE?"
+Stock Data: RELIANCE - Current: ₹2,450, 52W High: ₹2,800, 52W Low: ₹2,100
+
+Response:
+📊 **STOCK OVERVIEW**
+RELIANCE is trading at ₹2,450, down 12.5% from its 52-week high of ₹2,800. The stock shows consolidation near support levels.
+
+📈 **TECHNICAL ANALYSIS**
+- Support: ₹2,400 (strong)
+- Resistance: ₹2,600 (immediate)
+- RSI: 45 (neutral zone)
+- Trend: Sideways with bullish undertone
+
+💰 **FUNDAMENTAL INSIGHTS**
+- Market Cap: ₹16.5L Cr
+- P/E Ratio: 12.8x (reasonable)
+- Debt-to-Equity: 0.35 (healthy)
+- Revenue Growth: 8.2% YoY
+
+⚠️ **RISK ASSESSMENT**
+- Oil price volatility impact
+- Regulatory changes in telecom
+- Market sentiment dependency
+
+🎯 **RECOMMENDATION**
+BUY for long-term (12+ months)
+Target: ₹2,800-3,000
+Stop Loss: ₹2,300
+Allocation: 5-8% of portfolio
+
+**NOW ANALYZE:**
+User Query: "{query}"
+Stock Data: {rag_context}
+
+Provide analysis in the EXACT same format as the example above.
+"""
+
+    generate_content_config = types.GenerateContentConfig(
+        temperature=0.2,  # Very low for consistent format following
+        top_p=0.7,
+        max_output_tokens=1500
+    )
+    
+    contents = [types.Content(role="user", parts=[types.Part(text=one_shot_prompt)])]
+
+    response_text = ""
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-pro",
+            contents=contents,
+            config=generate_content_config
+        )
+        response_text = response.output_text if response.output_text else ""
+        return jsonify({"result": response_text, "method": "one-shot"})
+    except Exception as e:
+        return jsonify({"result": "", "error": str(e)}), 500
+
 @app.route("/analyze-stock", methods=["POST"])
 def analyze_stock():
     data = request.get_json(force=True)
@@ -47,6 +123,8 @@ def analyze_stock():
 
     rag_context = get_stock_context(symbol)
 
+    # RTFC Framework Implementation
+    # R = Role, T = Task, F = Format, C = Context
     
     system_prompt = f"""
 **ROLE**: You are Saytrix AI, an expert financial analyst and AI assistant specializing in Indian and global stock markets. You have deep expertise in technical analysis, fundamental analysis, market sentiment, and portfolio management.
@@ -138,6 +216,24 @@ If the query is general, provide a comprehensive analysis. If specific (e.g., "S
         return jsonify({"result": response_text})
     except Exception as e:
         return jsonify({"result": "", "error": str(e)}), 500
+
+@app.route("/compare-methods", methods=["GET"])
+def compare_methods():
+    """Compare One-Shot vs RTFC Framework responses"""
+    return jsonify({
+        "methods": {
+            "one_shot": {
+                "description": "Single example-driven prompting",
+                "endpoint": "/one-shot-analysis",
+                "benefits": ["Consistent format", "Simple setup", "Fast responses"]
+            },
+            "rtfc": {
+                "description": "Role-Task-Format-Context framework", 
+                "endpoint": "/analyze-stock",
+                "benefits": ["Comprehensive analysis", "Context-aware", "Flexible responses"]
+            }
+        }
+    })
 
 if __name__ == "__main__":
     app.run(debug=True)
