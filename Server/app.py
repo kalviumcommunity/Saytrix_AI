@@ -150,10 +150,26 @@ Start your analysis now, thinking through each step carefully.
         )
         response_text = response.output_text if response.output_text else ""
         
+        # Token usage logging
+        input_tokens = response.usage_metadata.prompt_token_count if hasattr(response, 'usage_metadata') else 0
+        output_tokens = response.usage_metadata.candidates_token_count if hasattr(response, 'usage_metadata') else 0
+        total_tokens = input_tokens + output_tokens
+        
+        print(f"🔢 TOKENS USED - Chain of Thought Analysis:")
+        print(f"   Input Tokens: {input_tokens}")
+        print(f"   Output Tokens: {output_tokens}")
+        print(f"   Total Tokens: {total_tokens}")
+        print(f"   Estimated Cost: ${total_tokens * 0.000002:.6f}")
+        
         return jsonify({
             "result": response_text,
             "method": "chain-of-thought",
             "reasoning_steps": 5,
+            "token_usage": {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": total_tokens
+            },
             "context": {
                 "symbol": symbol,
                 "market_condition": context.get("market_condition"),
@@ -257,9 +273,25 @@ Adapt your entire response tone, focus, and recommendations to match the current
         )
         response_text = response.output_text if response.output_text else ""
         
+        # Token usage logging
+        input_tokens = response.usage_metadata.prompt_token_count if hasattr(response, 'usage_metadata') else 0
+        output_tokens = response.usage_metadata.candidates_token_count if hasattr(response, 'usage_metadata') else 0
+        total_tokens = input_tokens + output_tokens
+        
+        print(f"🔢 TOKENS USED - Dynamic Analysis:")
+        print(f"   Input Tokens: {input_tokens}")
+        print(f"   Output Tokens: {output_tokens}")
+        print(f"   Total Tokens: {total_tokens}")
+        print(f"   Estimated Cost: ${total_tokens * 0.000002:.6f}")
+        
         return jsonify({
             "result": response_text,
             "method": "dynamic",
+            "token_usage": {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": total_tokens
+            },
             "adaptations": {
                 "market_condition": context.get("market_condition"),
                 "query_focus": focus,
@@ -362,7 +394,27 @@ Based on the examples above, provide analysis matching the appropriate tone (bul
             config=generate_content_config
         )
         response_text = response.output_text if response.output_text else ""
-        return jsonify({"result": response_text, "method": "multi-shot"})
+        
+        # Token usage logging
+        input_tokens = response.usage_metadata.prompt_token_count if hasattr(response, 'usage_metadata') else 0
+        output_tokens = response.usage_metadata.candidates_token_count if hasattr(response, 'usage_metadata') else 0
+        total_tokens = input_tokens + output_tokens
+        
+        print(f"🔢 TOKENS USED - Multi-Shot Analysis:")
+        print(f"   Input Tokens: {input_tokens}")
+        print(f"   Output Tokens: {output_tokens}")
+        print(f"   Total Tokens: {total_tokens}")
+        print(f"   Estimated Cost: ${total_tokens * 0.000002:.6f}")
+        
+        return jsonify({
+            "result": response_text, 
+            "method": "multi-shot",
+            "token_usage": {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": total_tokens
+            }
+        })
     except Exception as e:
         return jsonify({"result": "", "error": str(e)}), 500
 
@@ -436,7 +488,27 @@ Provide analysis in the EXACT same format as the example above.
             config=generate_content_config
         )
         response_text = response.output_text if response.output_text else ""
-        return jsonify({"result": response_text, "method": "one-shot"})
+        
+        # Token usage logging
+        input_tokens = response.usage_metadata.prompt_token_count if hasattr(response, 'usage_metadata') else 0
+        output_tokens = response.usage_metadata.candidates_token_count if hasattr(response, 'usage_metadata') else 0
+        total_tokens = input_tokens + output_tokens
+        
+        print(f"🔢 TOKENS USED - One-Shot Analysis:")
+        print(f"   Input Tokens: {input_tokens}")
+        print(f"   Output Tokens: {output_tokens}")
+        print(f"   Total Tokens: {total_tokens}")
+        print(f"   Estimated Cost: ${total_tokens * 0.000002:.6f}")
+        
+        return jsonify({
+            "result": response_text, 
+            "method": "one-shot",
+            "token_usage": {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": total_tokens
+            }
+        })
     except Exception as e:
         return jsonify({"result": "", "error": str(e)}), 500
 
