@@ -47,6 +47,7 @@ def get_stock_context(symbol):
                 market_condition = "mid_range"
         else:
             market_condition = "unknown"
+            price_position = 0
 
         context = {
             "symbol": symbol,
@@ -57,150 +58,15 @@ def get_stock_context(symbol):
             "market_cap": market_cap,
             "price_change": round(price_change, 2),
             "market_condition": market_condition,
-            "price_position": round(price_position, 1) if 'price_position' in locals() else "N/A"
+            "price_position": round(price_position, 1)
         }
         return context
     except Exception as e:
         return {"error": f"Could not fetch stock data for {symbol}. Error: {str(e)}"}
 
-def create_dynamic_prompt(symbol, query, context, user_type="general"):
-    """Dynamic prompt generation based on context and user type"""
-    
-    # Determine analysis complexity based on query
-    if any(word in query.lower() for word in ["technical", "chart", "rsi", "macd", "support", "resistance"]):
-        analysis_type = "technical_focused"
-    elif any(word in query.lower() for word in ["fundamental", "pe", "revenue", "profit", "earnings"]):
-        analysis_type = "fundamental_focused"
-    elif any(word in query.lower() for word in ["buy", "sell", "invest", "recommendation"]):
-        analysis_type = "recommendation_focused"
-    else:
-        analysis_type = "comprehensive"
-    
-    # Determine urgency based on market condition
-    if context.get("market_condition") == "near_high":
-        urgency = "high_risk"
-    elif context.get("market_condition") == "near_low":
-        urgency = "opportunity"
-    else:
-        urgency = "normal"
-    
-    # Base prompt structure
-    base_prompt = f"""
-You are Saytrix AI, an expert financial analyst. Analyze {symbol} dynamically based on current market conditions.
-
-**CURRENT MARKET CONTEXT:**
-- Stock: {symbol}
-- Price: ₹{context.get('current_price', 'N/A')}
-- 52W Range: ₹{context.get('low_52', 'N/A')} - ₹{context.get('high_52', 'N/A')}
-- Market Position: {context.get('market_condition', 'unknown')} ({context.get('price_position', 'N/A')}% of range)
-- Recent Change: {context.get('price_change', 0)}%
-- P/E Ratio: {context.get('pe_ratio', 'N/A')}
-"""
-
-    # Dynamic sections based on analysis type
-    if analysis_type == "technical_focused":
-        prompt_focus = """
-**ANALYSIS FOCUS: TECHNICAL**
-Provide detailed technical analysis including:
-- Chart patterns and trend analysis
-- Key support and resistance levels
-- Technical indicators (RSI, MACD, Moving averages)
-- Entry and exit points
-- Risk management levels
-"""
-    elif analysis_type == "fundamental_focused":
-        prompt_focus = """
-**ANALYSIS FOCUS: FUNDAMENTAL**
-Provide detailed fundamental analysis including:
-- Valuation metrics and ratios
-- Business model and competitive position
-- Financial health and growth prospects
-- Industry comparison
-- Long-term investment thesis
-"""
-    elif analysis_type == "recommendation_focused":
-        prompt_focus = """
-**ANALYSIS FOCUS: INVESTMENT RECOMMENDATION**
-Provide clear investment guidance including:
-- Buy/Hold/Sell recommendation with rationale
-- Target price and timeline
-- Risk assessment and mitigation
-- Portfolio allocation suggestion
-- Alternative investment options
-"""
-    else:
-        prompt_focus = """
-**ANALYSIS FOCUS: COMPREHENSIVE**
-Provide balanced analysis covering:
-- Technical and fundamental insights
-- Risk-reward assessment
-- Market context and timing
-- Clear actionable recommendations
-"""
-
-    # Dynamic urgency and tone based on market condition
-    if urgency == "high_risk":
-        tone_instruction = """
-**TONE: CAUTIOUS**
-The stock is near 52-week highs. Use cautious language, emphasize risk management, and consider profit-booking opportunities.
-"""
-    elif urgency == "opportunity":
-        tone_instruction = """
-**TONE: OPPORTUNISTIC**
-The stock is near 52-week lows. Look for value opportunities, but assess if it's a falling knife or genuine value.
-"""
-    else:
-        tone_instruction = """
-**TONE: BALANCED**
-The stock is in mid-range. Provide balanced analysis focusing on fundamentals and technical setup.
-"""
-
-    # User type customization
-    if user_type == "beginner":
-        complexity_instruction = """
-**COMPLEXITY: BEGINNER-FRIENDLY**
-Use simple language, explain technical terms, provide educational context, and focus on basic concepts.
-"""
-    elif user_type == "advanced":
-        complexity_instruction = """
-**COMPLEXITY: ADVANCED**
-Use professional terminology, provide detailed analysis, include advanced metrics, and assume market knowledge.
-"""
-    else:
-        complexity_instruction = """
-**COMPLEXITY: INTERMEDIATE**
-Balance technical accuracy with accessibility, explain key concepts briefly, and provide actionable insights.
-"""
-
-    # Response format
-    format_instruction = """
-**RESPONSE FORMAT:**
-📊 **DYNAMIC OVERVIEW**
-- Current market position and key insights
-- Context-specific observations
-
-📈 **FOCUSED ANALYSIS**
-- Analysis tailored to query type and market condition
-- Relevant technical or fundamental insights
-
-⚠️ **CONTEXTUAL RISKS**
-- Risks specific to current market position
-- Timing and market condition considerations
-
-🎯 **ADAPTIVE RECOMMENDATION**
-- Recommendation adjusted for market condition
-- Specific action items and timeline
-
-**USER QUERY:** "{query}"
-
-Provide analysis that adapts to the current market condition, query focus, and responds with appropriate urgency and complexity.
-"""
-
-    return base_prompt + prompt_focus + tone_instruction + complexity_instruction + format_instruction
-
 @app.route("/chain-of-thought-analysis", methods=["POST"])
 def chain_of_thought_analysis():
-    """Chain of Thought Prompting - Step-by-step reasoning for stock analysis"""
+    """Chain of Thought Prompting - Step-by-step reasoning"""
     data = request.get_json(force=True)
     symbol = data.get("symbol")
     query = data.get("query", "Should I invest in this stock?")
@@ -212,9 +78,6 @@ def chain_of_thought_analysis():
     if "error" in context:
         return jsonify({"error": context["error"]}), 500
 
-    # CHAIN OF THOUGHT PROMPTING IMPLEMENTATION
-    # Forces AI to show step-by-step reasoning process
-    
     cot_prompt = f"""
 You are Saytrix AI, a financial analyst. Analyze {symbol} using CHAIN OF THOUGHT reasoning.
 
@@ -228,8 +91,6 @@ You are Saytrix AI, a financial analyst. Analyze {symbol} using CHAIN OF THOUGHT
 - Market Position: {context.get('market_condition')}
 
 **USER QUESTION:** "{query}"
-
-**INSTRUCTIONS:** Show your complete reasoning process step-by-step. Think through each aspect systematically.
 
 **CHAIN OF THOUGHT ANALYSIS:**
 
@@ -268,15 +129,15 @@ Based on my step-by-step analysis:
 - Considering the risk-reward balance
 - Arriving at a logical recommendation
 
-**IMPORTANT:** Show your reasoning for each step. Explain WHY you reach each conclusion. Connect each step to the next logically.
+**IMPORTANT:** Show your reasoning for each step. Explain WHY you reach each conclusion.
 
-Start your analysis now, thinking through each step carefully and showing your complete thought process.
+Start your analysis now, thinking through each step carefully.
 """
 
     generate_content_config = types.GenerateContentConfig(
-        temperature=0.3,  # Balanced for logical reasoning
+        temperature=0.3,
         top_p=0.8,
-        max_output_tokens=2500  # More space for detailed reasoning
+        max_output_tokens=2500
     )
     
     contents = [types.Content(role="user", parts=[types.Part(text=cot_prompt)])]
@@ -410,6 +271,101 @@ Adapt your entire response tone, focus, and recommendations to match the current
     except Exception as e:
         return jsonify({"result": "", "error": str(e)}), 500
 
+@app.route("/multi-shot-analysis", methods=["POST"])
+def multi_shot_analysis():
+    """Multi-Shot Prompting - Multiple examples for nuanced responses"""
+    data = request.get_json(force=True)
+    symbol = data.get("symbol")
+    query = data.get("query", "Analyze this stock")
+
+    if not symbol:
+        return jsonify({"error": "Missing 'symbol' in request."}), 400
+
+    context = get_stock_context(symbol)
+    if "error" in context:
+        return jsonify({"error": context["error"]}), 500
+
+    multi_shot_prompt = f"""
+You are Saytrix AI, a financial analyst. Learn from these examples to provide nuanced stock analysis:
+
+**EXAMPLE 1 - BULLISH STOCK:**
+User Query: "Should I buy HDFC Bank?"
+Stock Data: HDFC - Current: ₹1,650, 52W High: ₹1,700, 52W Low: ₹1,200, P/E: 18x
+
+Response:
+📊 **STOCK OVERVIEW**
+HDFC Bank trades near 52W high at ₹1,650, showing strong momentum with 37% gains from lows.
+
+📈 **TECHNICAL ANALYSIS**
+- Trend: Strong uptrend with higher highs
+- RSI: 65 (bullish but not overbought)
+- Support: ₹1,600 (recent breakout level)
+
+💰 **FUNDAMENTAL INSIGHTS**
+- P/E: 18x (reasonable for banking sector)
+- ROE: 16.8% (excellent)
+- NPA: 1.2% (best-in-class)
+
+⚠️ **RISK ASSESSMENT**
+- Low credit risk due to strong underwriting
+- Interest rate sensitivity moderate
+
+🎯 **RECOMMENDATION**
+STRONG BUY - Target: ₹1,800 (12M)
+Allocation: 8-10% of portfolio
+
+**EXAMPLE 2 - BEARISH STOCK:**
+User Query: "What about Paytm stock?"
+Stock Data: PAYTM - Current: ₹450, 52W High: ₹1,950, 52W Low: ₹440, P/E: -ve
+
+Response:
+📊 **STOCK OVERVIEW**
+Paytm trades near 52W lows at ₹450, down 77% from highs amid profitability concerns.
+
+📈 **TECHNICAL ANALYSIS**
+- Trend: Severe downtrend with lower lows
+- RSI: 25 (oversold but no reversal signs)
+- Resistance: ₹550 (major overhead supply)
+
+💰 **FUNDAMENTAL INSIGHTS**
+- P/E: Negative (loss-making)
+- Revenue: Declining 8% YoY
+- Cash burn: High operational losses
+
+⚠️ **RISK ASSESSMENT**
+- High execution risk in competitive fintech
+- Regulatory uncertainties persist
+
+🎯 **RECOMMENDATION**
+AVOID - Wait for business turnaround
+No allocation recommended
+
+**NOW ANALYZE:**
+User Query: "{query}"
+Stock Data: {symbol} - Current: ₹{context.get('current_price')}, 52W High: ₹{context.get('high_52')}, 52W Low: ₹{context.get('low_52')}, P/E: {context.get('pe_ratio')}
+
+Based on the examples above, provide analysis matching the appropriate tone (bullish/bearish/neutral) for the stock's actual condition.
+"""
+
+    generate_content_config = types.GenerateContentConfig(
+        temperature=0.4,
+        top_p=0.8,
+        max_output_tokens=1800
+    )
+    
+    contents = [types.Content(role="user", parts=[types.Part(text=multi_shot_prompt)])]
+
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-pro",
+            contents=contents,
+            config=generate_content_config
+        )
+        response_text = response.output_text if response.output_text else ""
+        return jsonify({"result": response_text, "method": "multi-shot"})
+    except Exception as e:
+        return jsonify({"result": "", "error": str(e)}), 500
+
 @app.route("/one-shot-analysis", methods=["POST"])
 def one_shot_analysis():
     """One-Shot Prompting - Single example for format consistency"""
@@ -484,258 +440,16 @@ Provide analysis in the EXACT same format as the example above.
     except Exception as e:
         return jsonify({"result": "", "error": str(e)}), 500
 
-@app.route("/multi-shot-analysis", methods=["POST"])
-def multi_shot_analysis():
-    """Multi-Shot Prompting - Multiple examples for nuanced responses"""
-    data = request.get_json(force=True)
-    symbol = data.get("symbol")
-    query = data.get("query", "Analyze this stock")
-
-    if not symbol:
-        return jsonify({"error": "Missing 'symbol' in request."}), 400
-
-    context = get_stock_context(symbol)
-    if "error" in context:
-        return jsonify({"error": context["error"]}), 500
-
-    multi_shot_prompt = f"""
-You are Saytrix AI, a financial analyst. Learn from these examples to provide nuanced stock analysis:
-
-**EXAMPLE 1 - BULLISH STOCK:**
-User Query: "Should I buy HDFC Bank?"
-Stock Data: HDFC - Current: ₹1,650, 52W High: ₹1,700, 52W Low: ₹1,200, P/E: 18x
-
-Response:
-📊 **STOCK OVERVIEW**
-HDFC Bank trades near 52W high at ₹1,650, showing strong momentum with 37% gains from lows.
-
-📈 **TECHNICAL ANALYSIS**
-- Trend: Strong uptrend with higher highs
-- RSI: 65 (bullish but not overbought)
-- Support: ₹1,600 (recent breakout level)
-
-💰 **FUNDAMENTAL INSIGHTS**
-- P/E: 18x (reasonable for banking sector)
-- ROE: 16.8% (excellent)
-- NPA: 1.2% (best-in-class)
-
-⚠️ **RISK ASSESSMENT**
-- Low credit risk due to strong underwriting
-- Interest rate sensitivity moderate
-
-🎯 **RECOMMENDATION**
-STRONG BUY - Target: ₹1,800 (12M)
-Allocation: 8-10% of portfolio
-
-**EXAMPLE 2 - BEARISH STOCK:**
-User Query: "What about Paytm stock?"
-Stock Data: PAYTM - Current: ₹450, 52W High: ₹1,950, 52W Low: ₹440, P/E: -ve
-
-Response:
-📊 **STOCK OVERVIEW**
-Paytm trades near 52W lows at ₹450, down 77% from highs amid profitability concerns.
-
-📈 **TECHNICAL ANALYSIS**
-- Trend: Severe downtrend with lower lows
-- RSI: 25 (oversold but no reversal signs)
-- Resistance: ₹550 (major overhead supply)
-
-💰 **FUNDAMENTAL INSIGHTS**
-- P/E: Negative (loss-making)
-- Revenue: Declining 8% YoY
-- Cash burn: High operational losses
-
-⚠️ **RISK ASSESSMENT**
-- High execution risk in competitive fintech
-- Regulatory uncertainties persist
-
-🎯 **RECOMMENDATION**
-AVOID - Wait for business turnaround
-No allocation recommended
-
-**EXAMPLE 3 - NEUTRAL STOCK:**
-User Query: "How is ITC performing?"
-Stock Data: ITC - Current: ₹420, 52W High: ₹480, 52W Low: ₹380, P/E: 22x
-
-Response:
-📊 **STOCK OVERVIEW**
-ITC trades in middle range at ₹420, showing sideways movement with steady dividend yield.
-
-📈 **TECHNICAL ANALYSIS**
-- Trend: Range-bound between ₹380-480
-- RSI: 50 (neutral territory)
-- Pattern: Consolidation phase
-
-💰 **FUNDAMENTAL INSIGHTS**
-- P/E: 22x (fair valuation)
-- Dividend yield: 5.2% (attractive)
-- Cigarette business stable but declining
-
-⚠️ **RISK ASSESSMENT**
-- ESG concerns limit re-rating potential
-- Diversification efforts showing mixed results
-
-🎯 **RECOMMENDATION**
-HOLD - Dividend play for conservative investors
-Allocation: 3-5% for income focus
-
-**NOW ANALYZE:**
-User Query: "{query}"
-Stock Data: {symbol} - Current: ₹{context.get('current_price')}, 52W High: ₹{context.get('high_52')}, 52W Low: ₹{context.get('low_52')}, P/E: {context.get('pe_ratio')}
-
-Based on the examples above, provide analysis matching the appropriate tone (bullish/bearish/neutral) for the stock's actual condition.
-"""
-
-    generate_content_config = types.GenerateContentConfig(
-        temperature=0.4,
-        top_p=0.8,
-        max_output_tokens=1800
-    )
-    
-    contents = [types.Content(role="user", parts=[types.Part(text=multi_shot_prompt)])]
-
+@app.route("/run-evaluation", methods=["POST"])
+def run_evaluation():
+    """Endpoint to trigger evaluation pipeline"""
     try:
-        response = client.models.generate_content(
-            model="gemini-2.5-pro",
-            contents=contents,
-            config=generate_content_config
-        )
-        response_text = response.output_text if response.output_text else ""
-        return jsonify({"result": response_text, "method": "multi-shot"})
+        from evaluation_pipeline import SaytrixEvaluationPipeline
+        pipeline = SaytrixEvaluationPipeline()
+        results = pipeline.run_evaluation_pipeline()
+        return jsonify(results)
     except Exception as e:
-        return jsonify({"result": "", "error": str(e)}), 500
-
-@app.route("/rtfc-analysis", methods=["POST"])
-def rtfc_analysis():
-    """RTFC Framework - Role, Task, Format, Context"""
-    data = request.get_json(force=True)
-    symbol = data.get("symbol")
-    query = data.get("query", "Give me a comprehensive analysis")
-
-    if not symbol:
-        return jsonify({"error": "Missing 'symbol' in request."}), 400
-
-    context = get_stock_context(symbol)
-    if "error" in context:
-        return jsonify({"error": context["error"]}), 500
-
-    system_prompt = f"""
-**ROLE**: You are Saytrix AI, an expert financial analyst and AI assistant specializing in Indian and global stock markets. You have deep expertise in technical analysis, fundamental analysis, market sentiment, and portfolio management.
-
-**TASK**: Analyze the provided stock data and respond to user queries with:
-1. Comprehensive stock analysis using real-time data
-2. Technical and fundamental insights
-3. Risk assessment and investment recommendations
-4. Market context and comparative analysis
-5. Actionable investment advice based on user's query
-
-**FORMAT**: Structure your response as follows:
-📊 **STOCK OVERVIEW**
-- Current market status and key metrics
-- Price movement analysis
-
-📈 **TECHNICAL ANALYSIS**
-- Support/resistance levels
-- Technical indicators interpretation
-- Trend analysis
-
-💰 **FUNDAMENTAL INSIGHTS**
-- Company performance metrics
-- Industry comparison
-- Growth prospects
-
-⚠️ **RISK ASSESSMENT**
-- Investment risks and opportunities
-- Market volatility factors
-
-🎯 **RECOMMENDATION**
-- Clear buy/hold/sell guidance
-- Target price and timeline
-- Portfolio allocation suggestions
-
-**CONTEXT**: Use the following real-time market data for analysis:
-Stock: {symbol}
-Current Price: ₹{context.get('current_price')}
-52-Week Range: ₹{context.get('low_52')} - ₹{context.get('high_52')}
-P/E Ratio: {context.get('pe_ratio')}
-Market Cap: {context.get('market_cap')}
-Recent Change: {context.get('price_change')}%
-Market Position: {context.get('market_condition')}
-
-Always provide data-driven insights, cite specific numbers from the context, and explain your reasoning clearly.
-"""
-
-    user_prompt = f"""
-**USER REQUEST**:
-Stock Symbol: {symbol}
-Specific Query: "{query}"
-
-**INSTRUCTIONS**: 
-Analyze the above stock based on the provided context and respond to the specific user query. Ensure your response is:
-- Accurate and data-driven
-- Tailored to the user's specific question
-- Actionable and practical
-- Professional yet accessible
-"""
-
-    generate_content_config = types.GenerateContentConfig(
-        temperature=0.3,
-        top_p=0.8,
-        max_output_tokens=2048
-    )
-    
-    contents = [
-        types.Content(role="model", parts=[types.Part(text=system_prompt)]),
-        types.Content(role="user", parts=[types.Part(text=user_prompt)])
-    ]
-
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.5-pro",
-            contents=contents,
-            config=generate_content_config
-        )
-        response_text = response.output_text if response.output_text else ""
-        return jsonify({"result": response_text, "method": "rtfc"})
-    except Exception as e:
-        return jsonify({"result": "", "error": str(e)}), 500
-
-@app.route("/compare-all-methods", methods=["POST"])
-def compare_all_methods():
-    """Compare all four prompting methods"""
-    data = request.get_json(force=True)
-    symbol = data.get("symbol", "RELIANCE")
-    
-    return jsonify({
-        "symbol": symbol,
-        "available_methods": {
-            "dynamic": {
-                "endpoint": "/dynamic-analysis",
-                "description": "Adapts to market conditions and query type",
-                "parameters": ["symbol", "query", "user_type"]
-            },
-            "one_shot": {
-                "endpoint": "/one-shot-analysis", 
-                "description": "Single example for format consistency",
-                "parameters": ["symbol", "query"]
-            },
-            "multi_shot": {
-                "endpoint": "/multi-shot-analysis",
-                "description": "Multiple examples for nuanced responses", 
-                "parameters": ["symbol", "query"]
-            },
-            "rtfc": {
-                "endpoint": "/rtfc-analysis",
-                "description": "Role-Task-Format-Context framework",
-                "parameters": ["symbol", "query"]
-            }
-        },
-        "sample_request": {
-            "symbol": symbol,
-            "query": "Should I invest in this stock?",
-            "user_type": "general"
-        }
-    })
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/health", methods=["GET"])
 def health_check():
@@ -744,7 +458,13 @@ def health_check():
         "status": "healthy",
         "service": "Saytrix AI",
         "version": "1.0.0",
-        "timestamp": datetime.datetime.now().isoformat()
+        "timestamp": datetime.datetime.now().isoformat(),
+        "available_methods": [
+            "chain-of-thought-analysis",
+            "dynamic-analysis", 
+            "multi-shot-analysis",
+            "one-shot-analysis"
+        ]
     })
 
 if __name__ == "__main__":
