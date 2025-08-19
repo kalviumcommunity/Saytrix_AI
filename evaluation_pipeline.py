@@ -215,6 +215,17 @@ Provide your evaluation in this exact JSON format:
                 config=generate_config
             )
             
+            # Token usage logging for judge evaluation
+            input_tokens = response.usage_metadata.prompt_token_count if hasattr(response, 'usage_metadata') else 0
+            output_tokens = response.usage_metadata.candidates_token_count if hasattr(response, 'usage_metadata') else 0
+            total_tokens = input_tokens + output_tokens
+            
+            print(f"🔢 TOKENS USED - Judge Evaluation:")
+            print(f"   Input Tokens: {input_tokens}")
+            print(f"   Output Tokens: {output_tokens}")
+            print(f"   Total Tokens: {total_tokens}")
+            print(f"   Estimated Cost: ${total_tokens * 0.000002:.6f}")
+            
             # Extract JSON from response
             response_text = response.output_text
             json_start = response_text.find('{')
@@ -222,7 +233,13 @@ Provide your evaluation in this exact JSON format:
             
             if json_start != -1 and json_end != -1:
                 json_str = response_text[json_start:json_end]
-                return json.loads(json_str)
+                evaluation_result = json.loads(json_str)
+                evaluation_result['token_usage'] = {
+                    'input_tokens': input_tokens,
+                    'output_tokens': output_tokens,
+                    'total_tokens': total_tokens
+                }
+                return evaluation_result
             else:
                 return {"error": "Could not parse judge response"}
                 
@@ -342,6 +359,7 @@ if __name__ == "__main__":
     print("🎥 Saytrix AI Evaluation Pipeline - As Featured in Video")
     print("📊 Testing 5 Financial Scenarios with Judge Prompt Evaluation")
     print("🧠 Demonstrating RAG, Function Calling, Structured Output & Reasoning")
+    print("🔢 Token Usage Tracking: Monitor AI costs and efficiency")
     print("=" * 70)
     
     pipeline = SaytrixEvaluationPipeline()
@@ -361,6 +379,21 @@ if __name__ == "__main__":
     print("- Pass Threshold: 15/25 (60%)")
     
     print("\n🧪 RUNNING EVALUATION PIPELINE...")
+    print("📊 Token usage will be logged for each AI call\n")
+    
     results = pipeline.run_evaluation_pipeline()
     
+    # Calculate total token usage across all tests
+    total_tokens_used = 0
+    for result in results['results']:
+        if result['status'] == 'COMPLETED':
+            # Model tokens
+            model_response = result.get('model_output', '')
+            # Judge tokens (if available in evaluation)
+            if result.get('evaluation') and 'token_usage' in result['evaluation']:
+                total_tokens_used += result['evaluation']['token_usage']['total_tokens']
+    
+    print(f"\n💰 TOTAL EVALUATION COST SUMMARY:")
+    print(f"   Total Tokens Used: {total_tokens_used}")
+    print(f"   Estimated Total Cost: ${total_tokens_used * 0.000002:.6f}")
     print("\n✅ Evaluation Complete! Check results file for detailed analysis.")
