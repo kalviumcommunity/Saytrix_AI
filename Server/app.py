@@ -134,11 +134,15 @@ Based on my step-by-step analysis:
 Start your analysis now, thinking through each step carefully.
 """
 
+    # TEMPERATURE UPDATE: Optimized for logical reasoning
+    # Temperature 0.25 = More focused reasoning while maintaining creativity
     generate_content_config = types.GenerateContentConfig(
-        temperature=0.3,
+        temperature=0.25,  # Updated: Enhanced logical reasoning
         top_p=0.8,
         max_output_tokens=2500
     )
+    
+    print(f"🌡️ TEMPERATURE: 0.25 (Logical reasoning mode)")
     
     contents = [types.Content(role="user", parts=[types.Part(text=cot_prompt)])]
 
@@ -257,11 +261,14 @@ You are Saytrix AI. Analyze {symbol} with DYNAMIC adaptation:
 Adapt your entire response tone, focus, and recommendations to match the current market condition and user's specific needs.
 """
 
+    # TEMPERATURE: Dynamic adaptation based on market conditions
     generate_content_config = types.GenerateContentConfig(
-        temperature=temperature,
+        temperature=temperature,  # 0.2 (cautious) | 0.4 (opportunistic) | 0.3 (balanced)
         top_p=0.8,
         max_output_tokens=2000
     )
+    
+    print(f"🌡️ TEMPERATURE: {temperature} ({tone.split(' - ')[0].lower()} mode)")
     
     contents = [types.Content(role="user", parts=[types.Part(text=dynamic_prompt)])]
 
@@ -379,11 +386,15 @@ Stock Data: {symbol} - Current: ₹{context.get('current_price')}, 52W High: ₹
 Based on the examples above, provide analysis matching the appropriate tone (bullish/bearish/neutral) for the stock's actual condition.
 """
 
+    # TEMPERATURE UPDATE: Optimized for contextual adaptation
+    # Temperature 0.35 = Better balance for nuanced responses
     generate_content_config = types.GenerateContentConfig(
-        temperature=0.4,
+        temperature=0.35,  # Updated: Enhanced contextual responses
         top_p=0.8,
         max_output_tokens=1800
     )
+    
+    print(f"🌡️ TEMPERATURE: 0.35 (Contextual adaptation mode)")
     
     contents = [types.Content(role="user", parts=[types.Part(text=multi_shot_prompt)])]
 
@@ -473,11 +484,15 @@ Stock Data: {symbol} - Current: ₹{context.get('current_price')}, 52W High: ₹
 Provide analysis in the EXACT same format as the example above.
 """
 
+    # TEMPERATURE UPDATE: Optimized for format consistency
+    # Temperature 0.15 = More consistent format following
     generate_content_config = types.GenerateContentConfig(
-        temperature=0.2,
+        temperature=0.15,  # Updated: Enhanced format consistency
         top_p=0.7,
         max_output_tokens=1500
     )
+    
+    print(f"🌡️ TEMPERATURE: 0.15 (Format consistency mode)")
     
     contents = [types.Content(role="user", parts=[types.Part(text=one_shot_prompt)])]
 
@@ -525,19 +540,32 @@ def run_evaluation():
 
 @app.route("/health", methods=["GET"])
 def health_check():
-    """Health check endpoint"""
+    """Health check endpoint with temperature settings info"""
     return jsonify({
         "status": "healthy",
         "service": "Saytrix AI",
-        "version": "1.0.0",
+        "version": "1.1.0",  # Updated version
         "timestamp": datetime.datetime.now().isoformat(),
         "available_methods": [
             "chain-of-thought-analysis",
             "dynamic-analysis", 
             "multi-shot-analysis",
             "one-shot-analysis"
-        ]
+        ],
+        "temperature_settings": {
+            "chain_of_thought": 0.25,
+            "dynamic_analysis": "0.2-0.4 (adaptive)",
+            "multi_shot": 0.35,
+            "one_shot": 0.15
+        },
+        "optimization": "Temperature settings optimized for each prompting method"
     })
 
 if __name__ == "__main__":
+    print("🌡️ SAYTRIX AI - TEMPERATURE OPTIMIZED VERSION")
+    print("📊 Chain of Thought: 0.25 (Logical reasoning)")
+    print("🔄 Dynamic Analysis: 0.2-0.4 (Adaptive)")
+    print("📈 Multi-Shot: 0.35 (Contextual adaptation)")
+    print("🎯 One-Shot: 0.15 (Format consistency)")
+    print("=" * 50)
     app.run(debug=True, host="0.0.0.0", port=5000)

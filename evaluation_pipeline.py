@@ -201,11 +201,14 @@ Provide your evaluation in this exact JSON format:
         judge_prompt = self.create_judge_prompt(test_case, model_output)
         
         try:
+            # TEMPERATURE UPDATE: Optimized for consistent evaluation
             generate_config = types.GenerateContentConfig(
-                temperature=0.1, 
+                temperature=0.05,  # Updated: Maximum consistency for judge scoring
                 top_p=0.8,
                 max_output_tokens=1500
             )
+            
+            print(f"🌡️ JUDGE TEMPERATURE: 0.05 (Deterministic evaluation mode)")
             
             contents = [types.Content(role="user", parts=[types.Part(text=judge_prompt)])]
             
