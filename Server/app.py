@@ -47,8 +47,6 @@ def analyze_stock():
 
     rag_context = get_stock_context(symbol)
 
-    # RTFC Framework Implementation
-    # R = Role, T = Task, F = Format, C = Context
     
     system_prompt = f"""
 **ROLE**: You are Saytrix AI, an expert financial analyst and AI assistant specializing in Indian and global stock markets. You have deep expertise in technical analysis, fundamental analysis, market sentiment, and portfolio management.
