@@ -217,9 +217,132 @@ If the query is general, provide a comprehensive analysis. If specific (e.g., "S
     except Exception as e:
         return jsonify({"result": "", "error": str(e)}), 500
 
+@app.route("/multi-shot-analysis", methods=["POST"])
+def multi_shot_analysis():
+    """Multi-Shot Prompting Implementation for Stock Analysis"""
+    data = request.get_json(force=True)
+    symbol = data.get("symbol")
+    query = data.get("query", "Analyze this stock")
+
+    if not symbol:
+        return jsonify({"error": "Missing 'symbol' in request."}), 400
+
+    rag_context = get_stock_context(symbol)
+
+    # MULTI-SHOT PROMPTING IMPLEMENTATION
+    # Providing multiple examples to teach complex patterns and nuanced responses
+    
+    multi_shot_prompt = f"""
+You are Saytrix AI, a financial analyst. Learn from these examples to provide nuanced stock analysis:
+
+**EXAMPLE 1 - BULLISH STOCK:**
+User Query: "Should I buy HDFC Bank?"
+Stock Data: HDFC - Current: ₹1,650, 52W High: ₹1,700, 52W Low: ₹1,200, P/E: 18x, Growth: 15%
+
+Response:
+📊 **STOCK OVERVIEW**
+HDFC Bank trades near 52W high at ₹1,650, showing strong momentum with 37% gains from lows.
+
+📈 **TECHNICAL ANALYSIS**
+- Trend: Strong uptrend with higher highs
+- RSI: 65 (bullish but not overbought)
+- Support: ₹1,600 (recent breakout level)
+
+💰 **FUNDAMENTAL INSIGHTS**
+- P/E: 18x (reasonable for banking sector)
+- ROE: 16.8% (excellent)
+- NPA: 1.2% (best-in-class)
+
+⚠️ **RISK ASSESSMENT**
+- Low credit risk due to strong underwriting
+- Interest rate sensitivity moderate
+
+🎯 **RECOMMENDATION**
+STRONG BUY - Target: ₹1,800 (12M)
+Allocation: 8-10% of portfolio
+
+**EXAMPLE 2 - BEARISH STOCK:**
+User Query: "What about Paytm stock?"
+Stock Data: PAYTM - Current: ₹450, 52W High: ₹1,950, 52W Low: ₹440, P/E: -ve, Revenue decline: -8%
+
+Response:
+📊 **STOCK OVERVIEW**
+Paytm trades near 52W lows at ₹450, down 77% from highs amid profitability concerns.
+
+📈 **TECHNICAL ANALYSIS**
+- Trend: Severe downtrend with lower lows
+- RSI: 25 (oversold but no reversal signs)
+- Resistance: ₹550 (major overhead supply)
+
+💰 **FUNDAMENTAL INSIGHTS**
+- P/E: Negative (loss-making)
+- Revenue: Declining 8% YoY
+- Cash burn: High operational losses
+
+⚠️ **RISK ASSESSMENT**
+- High execution risk in competitive fintech
+- Regulatory uncertainties persist
+
+🎯 **RECOMMENDATION**
+AVOID - Wait for business turnaround
+No allocation recommended
+
+**EXAMPLE 3 - NEUTRAL STOCK:**
+User Query: "How is ITC performing?"
+Stock Data: ITC - Current: ₹420, 52W High: ₹480, 52W Low: ₹380, P/E: 22x, Dividend: 5.2%
+
+Response:
+📊 **STOCK OVERVIEW**
+ITC trades in middle range at ₹420, showing sideways movement with steady dividend yield.
+
+📈 **TECHNICAL ANALYSIS**
+- Trend: Range-bound between ₹380-480
+- RSI: 50 (neutral territory)
+- Pattern: Consolidation phase
+
+💰 **FUNDAMENTAL INSIGHTS**
+- P/E: 22x (fair valuation)
+- Dividend yield: 5.2% (attractive)
+- Cigarette business stable but declining
+
+⚠️ **RISK ASSESSMENT**
+- ESG concerns limit re-rating potential
+- Diversification efforts showing mixed results
+
+🎯 **RECOMMENDATION**
+HOLD - Dividend play for conservative investors
+Allocation: 3-5% for income focus
+
+**NOW ANALYZE:**
+User Query: "{query}"
+Stock Data: {rag_context}
+
+Based on the examples above, provide analysis matching the appropriate tone (bullish/bearish/neutral) for the stock's actual condition.
+"""
+
+    generate_content_config = types.GenerateContentConfig(
+        temperature=0.4,  # Slightly higher for nuanced responses
+        top_p=0.8,
+        max_output_tokens=1800
+    )
+    
+    contents = [types.Content(role="user", parts=[types.Part(text=multi_shot_prompt)])]
+
+    response_text = ""
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-pro",
+            contents=contents,
+            config=generate_content_config
+        )
+        response_text = response.output_text if response.output_text else ""
+        return jsonify({"result": response_text, "method": "multi-shot"})
+    except Exception as e:
+        return jsonify({"result": "", "error": str(e)}), 500
+
 @app.route("/compare-methods", methods=["GET"])
 def compare_methods():
-    """Compare One-Shot vs RTFC Framework responses"""
+    """Compare One-Shot vs Multi-Shot vs RTFC Framework responses"""
     return jsonify({
         "methods": {
             "one_shot": {
@@ -227,11 +350,35 @@ def compare_methods():
                 "endpoint": "/one-shot-analysis",
                 "benefits": ["Consistent format", "Simple setup", "Fast responses"]
             },
+            "multi_shot": {
+                "description": "Multiple examples for nuanced responses",
+                "endpoint": "/multi-shot-analysis", 
+                "benefits": ["Contextual tone", "Pattern learning", "Adaptive responses"]
+            },
             "rtfc": {
                 "description": "Role-Task-Format-Context framework", 
                 "endpoint": "/analyze-stock",
                 "benefits": ["Comprehensive analysis", "Context-aware", "Flexible responses"]
             }
+        }
+    })
+
+@app.route("/test-all-methods", methods=["POST"])
+def test_all_methods():
+    """Test all three prompting methods with the same stock"""
+    data = request.get_json(force=True)
+    symbol = data.get("symbol", "RELIANCE")
+    
+    return jsonify({
+        "symbol": symbol,
+        "endpoints": {
+            "one_shot": f"/one-shot-analysis",
+            "multi_shot": f"/multi-shot-analysis", 
+            "rtfc": f"/analyze-stock"
+        },
+        "sample_request": {
+            "symbol": symbol,
+            "query": "Should I invest in this stock?"
         }
     })
 
