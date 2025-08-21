@@ -5,6 +5,8 @@ from google.genai import types
 from dotenv import load_dotenv
 import yfinance as yf
 import datetime
+import json
+from typing import Dict, List, Optional
 
 # Load environment variables
 load_dotenv()
@@ -134,20 +136,45 @@ Based on my step-by-step analysis:
 Start your analysis now, thinking through each step carefully.
 """
 
-    # TEMPERATURE UPDATE: Optimized for logical reasoning
-    # Temperature 0.25 = More focused reasoning while maintaining creativity
-    # TOP P UPDATE: 0.9 = Broader vocabulary for comprehensive analysis
-    # TOP K UPDATE: 50 = Focused candidate pool for logical analysis
-    # STOP SEQUENCES: Control output boundaries for structured analysis
+    # STRUCTURED OUTPUT: Chain of Thought Analysis Schema
+    cot_schema = types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "analysis_steps": types.Schema(
+                type=types.Type.ARRAY,
+                items=types.Schema(
+                    type=types.Type.OBJECT,
+                    properties={
+                        "step_number": types.Schema(type=types.Type.INTEGER),
+                        "step_title": types.Schema(type=types.Type.STRING),
+                        "reasoning": types.Schema(type=types.Type.STRING)
+                    },
+                    required=["step_number", "step_title", "reasoning"]
+                )
+            ),
+            "final_recommendation": types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "action": types.Schema(type=types.Type.STRING),
+                    "confidence": types.Schema(type=types.Type.NUMBER),
+                    "rationale": types.Schema(type=types.Type.STRING)
+                },
+                required=["action", "confidence", "rationale"]
+            )
+        },
+        required=["analysis_steps", "final_recommendation"]
+    )
+    
     generate_content_config = types.GenerateContentConfig(
-        temperature=0.25,  # Updated: Enhanced logical reasoning
-        top_p=0.9,  # Updated: Expanded token selection for detailed analysis
-        top_k=50,  # Updated: Controlled candidate pool for reasoning
-        stop_sequences=["**END ANALYSIS**", "---", "DISCLAIMER:"],  # Updated: Structured boundaries
+        temperature=0.25,
+        top_p=0.9,
+        top_k=50,
+        stop_sequences=["**END ANALYSIS**", "---", "DISCLAIMER:"],
+        response_schema=cot_schema,
         max_output_tokens=2500
     )
     
-    print(f"🌡️ TEMPERATURE: 0.25 | TOP P: 0.9 | TOP K: 50 | STOP: Analysis boundaries (Logical reasoning mode)")
+    print(f"🌡️ TEMPERATURE: 0.25 | TOP P: 0.9 | TOP K: 50 | STOP: Analysis boundaries | SCHEMA: Chain of Thought (Logical reasoning mode)")
     
     contents = [types.Content(role="user", parts=[types.Part(text=cot_prompt)])]
 
@@ -599,11 +626,11 @@ def health_check():
             "multi_shot": ["**EXAMPLE END**", "---", "Additional Notes:"],
             "one_shot": ["**FORMAT END**", "---", "Disclaimer:"]
         },
-        "optimization": "Temperature, Top P, Top K, and Stop Sequences optimized for each prompting method"
+        "optimization": "Temperature, Top P, Top K, Stop Sequences, and Structured Output optimized for each prompting method"
     })
 
 if __name__ == "__main__":
-    print("🌡️ SAYTRIX AI - FULLY OPTIMIZED VERSION (TEMP | TOP P | TOP K | STOP)")
+    print("🌡️ SAYTRIX AI - FULLY OPTIMIZED VERSION (TEMP | TOP P | TOP K | STOP | SCHEMA)")
     print("📊 Chain of Thought: 0.25 | 0.9 | 50 | Analysis boundaries")
     print("🔄 Dynamic Analysis: 0.2-0.4 | 0.85-0.95 | 40-80 | Adaptive boundaries")
     print("📈 Multi-Shot: 0.35 | 0.88 | 60 | Example boundaries")
