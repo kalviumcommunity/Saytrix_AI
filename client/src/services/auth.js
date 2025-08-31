@@ -1,6 +1,6 @@
 class AuthService {
   constructor() {
-    this.baseURL = 'http://localhost:5000';
+    this.baseURL = import.meta.env.VITE_API_BASE_URL;
     this.token = localStorage.getItem('saytrix_token');
   }
 
