@@ -1,0 +1,17 @@
+meta {
+  name: portfolio calculator
+  type: http
+  seq: 3
+}
+
+post {
+  url: http://localhost:5000/function-calling
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+      "query": "Calculate my portfolio: 100 shares RELIANCE.NS at avg price 2400, 50 shares TCS.NS at avg price 3200"
+    }
+}

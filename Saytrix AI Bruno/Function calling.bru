@@ -1,0 +1,16 @@
+meta {
+  name: Function calling
+  type: http
+  seq: 2
+}
+
+post {
+  url: http://localhost:5000/function-calling
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {"query": "What's the current price of RELIANCE.NS?"}
+  
+}

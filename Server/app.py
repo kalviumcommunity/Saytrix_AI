@@ -1,612 +1,342 @@
-import os
 from flask import Flask, request, jsonify
-from google import genai
-from google.genai import types
+from flask_cors import CORS
+from datetime import datetime
+import os
 from dotenv import load_dotenv
-import yfinance as yf
-import datetime
+from functions import execute_function, get_stock_context
+from database import db
+from auth import auth_manager, require_auth
+from cost_monitor import cost_monitor
+import logging
+import uuid
+
+# Enhanced Gemini Integration
+try:
+    import google.generativeai as genai
+    
+    class EnhancedGeminiChat:
+        def __init__(self):
+            api_key = os.getenv('GEMINI_API_KEY')
+            if api_key:
+                genai.configure(api_key=api_key)
+                self.model = genai.GenerativeModel('gemini-1.5-flash')
+                self.available = True
+            else:
+                self.available = False
+        
+        def get_response(self, message: str, stock_data: dict = None) -> str:
+            if not self.available:
+                return self._fallback_response(message, stock_data)
+            
+            try:
+                # Closed-world prompt template
+                system_prompt = f"""You are Saytrix AI, a financial assistant. STRICT RULES:
+1. ONLY use data provided below - NEVER invent numbers
+2. If data missing, say "Data not available"
+3. Be helpful but factual only
+4. Format responses professionally
+
+USER MESSAGE: {message}
+
+PROVIDED DATA: {self._format_data(stock_data) if stock_data else 'No stock data provided'}
+
+Respond helpfully using ONLY the provided information:"""
+
+                response = self.model.generate_content(system_prompt)
+                return response.text
+            except Exception as e:
+                logging.error(f"Gemini error: {e}")
+                return self._fallback_response(message, stock_data)
+        
+        def _format_data(self, data: dict) -> str:
+            if not data or 'error' in data:
+                return "No valid stock data"
+            return f"Symbol: {data.get('symbol')}, Price: ₹{data.get('current_price')}, High: ₹{data.get('high')}, Low: ₹{data.get('low')}, Volume: {data.get('volume')}"
+        
+        def _fallback_response(self, message: str, stock_data: dict = None) -> str:
+            words = set(message.lower().split())
+            
+            if stock_data and 'error' not in stock_data:
+                return f"📊 **{stock_data.get('symbol')} Live Data**\n\n**Price:** ₹{stock_data.get('current_price')}\n**High:** ₹{stock_data.get('high')}\n**Low:** ₹{stock_data.get('low')}\n**Volume:** {stock_data.get('volume')}"
+            
+            if any(w in words for w in ['hi', 'hello', 'hey']):
+                return "Hello! I'm Saytrix AI, your financial assistant. Ask me about stocks, portfolio management, or market insights!"
+            
+            if 'portfolio' in words:
+                return "💼 Use the Portfolio Calculator in the sidebar to manage your investments and calculate P&L."
+            
+            if any(w in words for w in ['market', 'nifty', 'sensex']):
+                return "📈 Check the live market widgets in the sidebar for current market data and trends."
+            
+            return f"I can help with stock analysis, portfolio management, and market insights. Try asking about specific stocks or use the sidebar tools!"
+
+    gemini_chat = EnhancedGeminiChat()
+    
+except ImportError:
+    gemini_chat = None
+    print("Gemini API not available - using fallback mode")
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
 
 app = Flask(__name__)
+CORS(app, supports_credentials=True)
 
-# Initialize Gemini client
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-if not GEMINI_API_KEY:
-    raise RuntimeError("GEMINI_API_KEY not set in environment variables.")
-client = genai.Client(api_key=GEMINI_API_KEY)
+# Authentication Routes
+@app.route('/auth/register', methods=['POST'])
+def register():
+    data = request.get_json()
+    email = data.get('email')
+    password = data.get('password')
+    name = data.get('name')
+    
+    if not all([email, password, name]):
+        return jsonify({'error': 'Email, password, and name are required'}), 400
+    
+    result = db.create_user(email, password, name)
+    if 'error' in result:
+        return jsonify(result), 400
+    
+    token = auth_manager.generate_token(result['user_id'])
+    return jsonify({
+        'message': 'Registration successful',
+        'token': token,
+        'user': {'user_id': result['user_id'], 'name': name, 'email': email}
+    })
 
-def get_stock_context(symbol):
-    """Enhanced stock data retrieval with market context"""
+@app.route('/auth/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    email = data.get('email')
+    password = data.get('password')
+    
+    if not email or not password:
+        return jsonify({'error': 'Email and password are required'}), 400
+    
+    user = db.authenticate_user(email, password)
+    if 'error' in user:
+        return jsonify(user), 401
+    
+    token = auth_manager.generate_token(user['user_id'])
+    return jsonify({
+        'message': 'Login successful',
+        'token': token,
+        'user': user
+    })
+
+@app.route('/auth/verify', methods=['GET'])
+@require_auth
+def verify_token():
+    return jsonify({'valid': True, 'user_id': request.user_id})
+
+# User session modes
+user_modes = {}
+
+# Chat endpoint
+@app.route('/chat', methods=['POST'])
+@require_auth
+def chat():
+    data = request.get_json(force=True)
+    message = data.get('message', '')
+    user_id = request.user_id
+    conversation_id = data.get('conversation_id') or str(uuid.uuid4())
+    
+    if not message:
+        return jsonify({'error': 'Message is required'}), 400
+    
     try:
-        stock = yf.Ticker(symbol)
-        info = stock.info
-        hist = stock.history(period="1mo")
+        # Get user's current mode (default to None for greeting mode)
+        current_mode = user_modes.get(user_id, None)
         
-        current_price = info.get("currentPrice", "N/A")
-        high_52 = info.get("fiftyTwoWeekHigh", "N/A")
-        low_52 = info.get("fiftyTwoWeekLow", "N/A")
-        pe_ratio = info.get("trailingPE", "N/A")
-        market_cap = info.get("marketCap", "N/A")
+        # Reset to greeting mode if no recent activity
+        if current_mode and not has_recent_activity(user_id):
+            user_modes[user_id] = None
+            current_mode = None
         
-        # Calculate price change
-        if len(hist) > 1:
-            price_change = ((hist['Close'][-1] - hist['Close'][-2]) / hist['Close'][-2]) * 100
-        else:
-            price_change = 0
-            
-        # Determine market condition
-        if current_price != "N/A" and high_52 != "N/A" and low_52 != "N/A":
-            price_position = (current_price - low_52) / (high_52 - low_52) * 100
-            if price_position > 80:
-                market_condition = "near_high"
-            elif price_position < 20:
-                market_condition = "near_low"
+        # Get conversation history
+        conversation_history = db.get_conversation_history(user_id, conversation_id, limit=10)
+        db.save_message(user_id, conversation_id, 'user', message)
+        
+        stock_data = None
+        response_text = ""
+        
+        # Update user activity
+        update_user_activity(user_id)
+        
+        # Check for greetings first - this overrides any active mode
+        if message.lower().strip() in ['hi', 'hello', 'hey']:
+            # Clear any active mode when user greets
+            user_modes[user_id] = None
+            response_text = "Hello! I'm Saytrix AI, your financial assistant. Click a quick action button to get started!"
+        
+        # Only search for stocks if in stock_search mode
+        elif current_mode == 'stock_search':
+            symbol = detect_stock_symbol(message)
+            if symbol:
+                stock_data = execute_function('get_stock_price', {'symbol': symbol})
+                if gemini_chat and gemini_chat.available:
+                    response_text = gemini_chat.get_response(message, stock_data)
+                else:
+                    response_text = format_stock_response(stock_data)
             else:
-                market_condition = "mid_range"
+                response_text = "Please enter a valid stock symbol (e.g., RELIANCE, TCS, AAPL)"
+        
+        elif current_mode == 'portfolio':
+            response_text = "Portfolio mode active. Use the Portfolio Calculator in the sidebar to manage your investments."
+        
+        elif current_mode == 'news':
+            response_text = "News mode active. Check the News widget in the sidebar for latest updates."
+        
+        elif current_mode == 'analysis':
+            response_text = "Analysis mode active. Enter stock symbols for detailed analysis."
+        
         else:
-            market_condition = "unknown"
-            price_position = 0
-
-        context = {
-            "symbol": symbol,
-            "current_price": current_price,
-            "high_52": high_52,
-            "low_52": low_52,
-            "pe_ratio": pe_ratio,
-            "market_cap": market_cap,
-            "price_change": round(price_change, 2),
-            "market_condition": market_condition,
-            "price_position": round(price_position, 1)
-        }
-        return context
-    except Exception as e:
-        return {"error": f"Could not fetch stock data for {symbol}. Error: {str(e)}"}
-
-@app.route("/chain-of-thought-analysis", methods=["POST"])
-def chain_of_thought_analysis():
-    """Chain of Thought Prompting - Step-by-step reasoning"""
-    data = request.get_json(force=True)
-    symbol = data.get("symbol")
-    query = data.get("query", "Should I invest in this stock?")
-
-    if not symbol:
-        return jsonify({"error": "Missing 'symbol' in request."}), 400
-
-    context = get_stock_context(symbol)
-    if "error" in context:
-        return jsonify({"error": context["error"]}), 500
-
-    cot_prompt = f"""
-You are Saytrix AI, a financial analyst. Analyze {symbol} using CHAIN OF THOUGHT reasoning.
-
-**STOCK DATA:**
-- Symbol: {symbol}
-- Current Price: ₹{context.get('current_price')}
-- 52W High: ₹{context.get('high_52')}
-- 52W Low: ₹{context.get('low_52')}
-- P/E Ratio: {context.get('pe_ratio')}
-- Recent Change: {context.get('price_change')}%
-- Market Position: {context.get('market_condition')}
-
-**USER QUESTION:** "{query}"
-
-**CHAIN OF THOUGHT ANALYSIS:**
-
-🧠 **STEP 1: DATA INTERPRETATION**
-Let me first understand what the numbers tell us:
-- Current price vs 52W range analysis
-- P/E ratio evaluation
-- Recent price movement assessment
-- Market position implications
-
-📈 **STEP 2: TECHNICAL REASONING**
-Now I'll analyze the technical aspects:
-- Where is the stock in its trading range?
-- What does the recent price change indicate?
-- Is this a good entry/exit point technically?
-- What are the key support/resistance levels?
-
-💰 **STEP 3: FUNDAMENTAL REASONING**
-Next, let me evaluate the fundamentals:
-- Is the P/E ratio reasonable for this stock?
-- How does it compare to industry averages?
-- What does the valuation suggest?
-- Are there any red flags in the metrics?
-
-⚠️ **STEP 4: RISK ASSESSMENT**
-Now I need to consider the risks:
-- What risks does the current market position present?
-- How volatile has the stock been?
-- What external factors could affect it?
-- What's the risk-reward ratio?
-
-🎯 **STEP 5: LOGICAL CONCLUSION**
-Based on my step-by-step analysis:
-- Weighing all the factors I've considered
-- Connecting the technical and fundamental insights
-- Considering the risk-reward balance
-- Arriving at a logical recommendation
-
-**IMPORTANT:** Show your reasoning for each step. Explain WHY you reach each conclusion.
-
-Start your analysis now, thinking through each step carefully.
-"""
-
-    # TEMPERATURE UPDATE: Optimized for logical reasoning
-    # Temperature 0.25 = More focused reasoning while maintaining creativity
-    # TOP P UPDATE: 0.9 = Broader vocabulary for comprehensive analysis
-    # TOP K UPDATE: 50 = Focused candidate pool for logical analysis
-    # STOP SEQUENCES: Control output boundaries for structured analysis
-    generate_content_config = types.GenerateContentConfig(
-        temperature=0.25,  # Updated: Enhanced logical reasoning
-        top_p=0.9,  # Updated: Expanded token selection for detailed analysis
-        top_k=50,  # Updated: Controlled candidate pool for reasoning
-        stop_sequences=["**END ANALYSIS**", "---", "DISCLAIMER:"],  # Updated: Structured boundaries
-        max_output_tokens=2500
-    )
-    
-    print(f"🌡️ TEMPERATURE: 0.25 | TOP P: 0.9 | TOP K: 50 | STOP: Analysis boundaries (Logical reasoning mode)")
-    
-    contents = [types.Content(role="user", parts=[types.Part(text=cot_prompt)])]
-
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.5-pro",
-            contents=contents,
-            config=generate_content_config
-        )
-        response_text = response.output_text if response.output_text else ""
+            # No active mode - general chat
+            response_text = "I'm here to help! Use the quick action buttons or ask me about stocks and finance."
         
-        # Token usage logging
-        input_tokens = response.usage_metadata.prompt_token_count if hasattr(response, 'usage_metadata') else 0
-        output_tokens = response.usage_metadata.candidates_token_count if hasattr(response, 'usage_metadata') else 0
-        total_tokens = input_tokens + output_tokens
+        db.save_message(user_id, conversation_id, 'ai', response_text)
         
-        print(f"🔢 TOKENS USED - Chain of Thought Analysis:")
-        print(f"   Input Tokens: {input_tokens}")
-        print(f"   Output Tokens: {output_tokens}")
-        print(f"   Total Tokens: {total_tokens}")
-        print(f"   Estimated Cost: ${total_tokens * 0.000002:.6f}")
+        # Log usage
+        if stock_data:
+            cost_monitor.log_api_usage(user_id, 'stock_api', f'/stock/{symbol}', 'error' not in (stock_data or {}))
         
         return jsonify({
-            "result": response_text,
-            "method": "chain-of-thought",
-            "reasoning_steps": 5,
-            "token_usage": {
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-                "total_tokens": total_tokens
-            },
-            "context": {
-                "symbol": symbol,
-                "market_condition": context.get("market_condition"),
-                "analysis_type": "step-by-step reasoning"
-            }
+            'response': response_text,
+            'conversation_id': conversation_id,
+            'timestamp': datetime.now().isoformat(),
+            'user_id': user_id
         })
+        
     except Exception as e:
-        return jsonify({"result": "", "error": str(e)}), 500
+        logger.error(f"Chat error: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
 
-@app.route("/dynamic-analysis", methods=["POST"])
-def dynamic_analysis():
-    """Dynamic Prompting - Adapts to market conditions and query type"""
-    data = request.get_json(force=True)
-    symbol = data.get("symbol")
-    query = data.get("query", "Analyze this stock")
-    user_type = data.get("user_type", "general")
+def detect_stock_symbol(message):
+    """Detect stock symbol only when in stock search mode"""
+    message_upper = message.upper()
+    words = set(message.lower().split())
+    
+    # Direct symbol detection
+    import re
+    symbol_pattern = r'\b([A-Z]{2,10}(?:\.NS|\.BO)?|NIFTY|SENSEX)\b'
+    direct_symbols = re.findall(symbol_pattern, message_upper)
+    
+    if direct_symbols:
+        return direct_symbols[0]
+    
+    # Company name detection
+    stock_keywords = {
+        'zomato': 'ZOMATO.NS', 'reliance': 'RELIANCE.NS', 'tcs': 'TCS.NS',
+        'hdfc': 'HDFCBANK.NS', 'infosys': 'INFY.NS', 'apple': 'AAPL',
+        'microsoft': 'MSFT', 'tesla': 'TSLA'
+    }
+    
+    for keyword, stock_symbol in stock_keywords.items():
+        if keyword in words:
+            return stock_symbol
+    
+    return None
 
-    if not symbol:
-        return jsonify({"error": "Missing 'symbol' in request."}), 400
+def format_stock_response(stock_data):
+    """Format stock data response"""
+    if not stock_data or 'error' in stock_data:
+        return "Unable to fetch stock data. Please try again."
+    
+    return f"📊 **{stock_data.get('symbol')} Live Data**\n\n**Price:** ₹{stock_data.get('current_price')}\n**High:** ₹{stock_data.get('high')}\n**Low:** ₹{stock_data.get('low')}\n**Volume:** {stock_data.get('volume')}"
 
-    context = get_stock_context(symbol)
-    if "error" in context:
-        return jsonify({"error": context["error"]}), 500
+# Track user activity for auto-reset
+user_last_activity = {}
 
-    # Detect query focus
-    if any(word in query.lower() for word in ["technical", "chart", "support", "resistance"]):
-        focus = "technical"
-    elif any(word in query.lower() for word in ["fundamental", "pe", "revenue", "profit"]):
-        focus = "fundamental" 
-    elif any(word in query.lower() for word in ["buy", "sell", "invest", "recommendation"]):
-        focus = "recommendation"
+def has_recent_activity(user_id):
+    """Check if user has recent activity (within 5 minutes)"""
+    from datetime import datetime, timedelta
+    last_activity = user_last_activity.get(user_id)
+    if not last_activity:
+        return False
+    return datetime.now() - last_activity < timedelta(minutes=5)
+
+def update_user_activity(user_id):
+    """Update user's last activity timestamp"""
+    user_last_activity[user_id] = datetime.now()
+
+@app.route('/quick-action', methods=['POST'])
+@require_auth
+def quick_action():
+    data = request.json
+    action = data.get('action', '')
+    user_id = request.user_id
+    
+    # Update user activity
+    update_user_activity(user_id)
+    
+    # Set user mode based on action
+    if action == 'stock-search':
+        user_modes[user_id] = 'stock_search'
+        response = "🔍 **Stock Search Activated**\n\nEnter a stock symbol (e.g., RELIANCE, TCS, AAPL) to get live data."
+    elif action == 'portfolio-review':
+        user_modes[user_id] = 'portfolio'
+        response = "💼 **Portfolio Mode Activated**\n\nUse the Portfolio Calculator in the sidebar to manage your investments."
+    elif action == 'market-analysis':
+        user_modes[user_id] = 'analysis'
+        response = "📊 **Analysis Mode Activated**\n\nEnter stock symbols for detailed market analysis."
+    elif action == 'news-update':
+        user_modes[user_id] = 'news'
+        response = "📰 **News Mode Activated**\n\nCheck the News widget for latest updates or ask about specific stocks."
     else:
-        focus = "comprehensive"
-
-    # Adaptive temperature based on market condition
-    if context.get("market_condition") == "near_high":
-        temperature = 0.2
-        tone = "CAUTIOUS - Stock near 52W high, emphasize risk management"
-    elif context.get("market_condition") == "near_low":
-        temperature = 0.4
-        tone = "OPPORTUNISTIC - Stock near 52W low, assess value opportunity"
-    else:
-        temperature = 0.3
-        tone = "BALANCED - Stock in mid-range, provide neutral analysis"
-
-    dynamic_prompt = f"""
-You are Saytrix AI. Analyze {symbol} with DYNAMIC adaptation:
-
-**CURRENT CONTEXT:**
-- Stock: {symbol} at ₹{context.get('current_price')}
-- Position: {context.get('market_condition')} ({context.get('price_position')}% of 52W range)
-- Recent Change: {context.get('price_change')}%
-- Query Focus: {focus.upper()}
-- User Level: {user_type.upper()}
-
-**DYNAMIC INSTRUCTIONS:**
-{tone}
-
-**ADAPTIVE FOCUS:**
-{"Focus heavily on technical analysis, charts, and trading levels." if focus == "technical" else
- "Focus on fundamentals, valuation, and business metrics." if focus == "fundamental" else
- "Focus on clear buy/sell/hold recommendation with rationale." if focus == "recommendation" else
- "Provide comprehensive analysis covering all aspects."}
-
-**USER COMPLEXITY:**
-{"Use simple language and explain terms for beginners." if user_type == "beginner" else
- "Use professional terminology for advanced users." if user_type == "advanced" else
- "Balance technical accuracy with accessibility."}
-
-**RESPONSE FORMAT:**
-📊 **DYNAMIC OVERVIEW**
-- Market position and context-specific insights
-
-📈 **ADAPTIVE ANALYSIS**
-- Analysis tailored to query focus and market condition
-
-⚠️ **CONTEXTUAL RISKS**
-- Risks specific to current market position
-
-🎯 **SMART RECOMMENDATION**
-- Recommendation adapted to market condition and user query
-
-**USER QUERY:** "{query}"
-
-Adapt your entire response tone, focus, and recommendations to match the current market condition and user's specific needs.
-"""
-
-    # TEMPERATURE: Dynamic adaptation based on market conditions
-    # TOP P: Adaptive based on market volatility
-    # TOP K: Adaptive based on market conditions
-    # STOP SEQUENCES: Adaptive based on analysis focus
-    top_p_value = 0.95 if context.get("market_condition") == "near_low" else 0.85
-    top_k_value = 80 if context.get("market_condition") == "near_low" else 40
-    stop_sequences = ["**ANALYSIS COMPLETE**", "---", "Note:"] if focus == "recommendation" else ["**END SECTION**", "---", "Summary:"]
-    generate_content_config = types.GenerateContentConfig(
-        temperature=temperature,  # 0.2 (cautious) | 0.4 (opportunistic) | 0.3 (balanced)
-        top_p=top_p_value,  # Updated: 0.95 (opportunistic) | 0.85 (cautious/balanced)
-        top_k=top_k_value,  # Updated: 80 (opportunistic) | 40 (cautious/balanced)
-        stop_sequences=stop_sequences,  # Updated: Focus-based boundaries
-        max_output_tokens=2000
-    )
+        response = 'Action completed successfully.'
     
-    print(f"🌡️ TEMPERATURE: {temperature} | TOP P: {top_p_value} | TOP K: {top_k_value} | STOP: {len(stop_sequences)} sequences ({tone.split(' - ')[0].lower()} mode)")
-    
-    contents = [types.Content(role="user", parts=[types.Part(text=dynamic_prompt)])]
+    return jsonify({'response': response})
 
+@app.route('/market-data', methods=['GET'])
+def market_data():
     try:
-        response = client.models.generate_content(
-            model="gemini-2.5-pro",
-            contents=contents,
-            config=generate_content_config
-        )
-        response_text = response.output_text if response.output_text else ""
-        
-        # Token usage logging
-        input_tokens = response.usage_metadata.prompt_token_count if hasattr(response, 'usage_metadata') else 0
-        output_tokens = response.usage_metadata.candidates_token_count if hasattr(response, 'usage_metadata') else 0
-        total_tokens = input_tokens + output_tokens
-        
-        print(f"🔢 TOKENS USED - Dynamic Analysis:")
-        print(f"   Input Tokens: {input_tokens}")
-        print(f"   Output Tokens: {output_tokens}")
-        print(f"   Total Tokens: {total_tokens}")
-        print(f"   Estimated Cost: ${total_tokens * 0.000002:.6f}")
-        
-        return jsonify({
-            "result": response_text,
-            "method": "dynamic",
-            "token_usage": {
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-                "total_tokens": total_tokens
-            },
-            "adaptations": {
-                "market_condition": context.get("market_condition"),
-                "query_focus": focus,
-                "temperature_used": temperature,
-                "user_type": user_type,
-                "tone_applied": tone.split(" - ")[0]
-            }
-        })
-    except Exception as e:
-        return jsonify({"result": "", "error": str(e)}), 500
-
-@app.route("/multi-shot-analysis", methods=["POST"])
-def multi_shot_analysis():
-    """Multi-Shot Prompting - Multiple examples for nuanced responses"""
-    data = request.get_json(force=True)
-    symbol = data.get("symbol")
-    query = data.get("query", "Analyze this stock")
-
-    if not symbol:
-        return jsonify({"error": "Missing 'symbol' in request."}), 400
-
-    context = get_stock_context(symbol)
-    if "error" in context:
-        return jsonify({"error": context["error"]}), 500
-
-    multi_shot_prompt = f"""
-You are Saytrix AI, a financial analyst. Learn from these examples to provide nuanced stock analysis:
-
-**EXAMPLE 1 - BULLISH STOCK:**
-User Query: "Should I buy HDFC Bank?"
-Stock Data: HDFC - Current: ₹1,650, 52W High: ₹1,700, 52W Low: ₹1,200, P/E: 18x
-
-Response:
-📊 **STOCK OVERVIEW**
-HDFC Bank trades near 52W high at ₹1,650, showing strong momentum with 37% gains from lows.
-
-📈 **TECHNICAL ANALYSIS**
-- Trend: Strong uptrend with higher highs
-- RSI: 65 (bullish but not overbought)
-- Support: ₹1,600 (recent breakout level)
-
-💰 **FUNDAMENTAL INSIGHTS**
-- P/E: 18x (reasonable for banking sector)
-- ROE: 16.8% (excellent)
-- NPA: 1.2% (best-in-class)
-
-⚠️ **RISK ASSESSMENT**
-- Low credit risk due to strong underwriting
-- Interest rate sensitivity moderate
-
-🎯 **RECOMMENDATION**
-STRONG BUY - Target: ₹1,800 (12M)
-Allocation: 8-10% of portfolio
-
-**EXAMPLE 2 - BEARISH STOCK:**
-User Query: "What about Paytm stock?"
-Stock Data: PAYTM - Current: ₹450, 52W High: ₹1,950, 52W Low: ₹440, P/E: -ve
-
-Response:
-📊 **STOCK OVERVIEW**
-Paytm trades near 52W lows at ₹450, down 77% from highs amid profitability concerns.
-
-📈 **TECHNICAL ANALYSIS**
-- Trend: Severe downtrend with lower lows
-- RSI: 25 (oversold but no reversal signs)
-- Resistance: ₹550 (major overhead supply)
-
-💰 **FUNDAMENTAL INSIGHTS**
-- P/E: Negative (loss-making)
-- Revenue: Declining 8% YoY
-- Cash burn: High operational losses
-
-⚠️ **RISK ASSESSMENT**
-- High execution risk in competitive fintech
-- Regulatory uncertainties persist
-
-🎯 **RECOMMENDATION**
-AVOID - Wait for business turnaround
-No allocation recommended
-
-**NOW ANALYZE:**
-User Query: "{query}"
-Stock Data: {symbol} - Current: ₹{context.get('current_price')}, 52W High: ₹{context.get('high_52')}, 52W Low: ₹{context.get('low_52')}, P/E: {context.get('pe_ratio')}
-
-Based on the examples above, provide analysis matching the appropriate tone (bullish/bearish/neutral) for the stock's actual condition.
-"""
-
-    # TEMPERATURE UPDATE: Optimized for contextual adaptation
-    # Temperature 0.35 = Better balance for nuanced responses
-    # TOP P UPDATE: 0.88 = Balanced vocabulary for example-based learning
-    # TOP K UPDATE: 60 = Balanced candidate pool for example learning
-    # STOP SEQUENCES: Example-based boundaries for consistent learning
-    generate_content_config = types.GenerateContentConfig(
-        temperature=0.35,  # Updated: Enhanced contextual responses
-        top_p=0.88,  # Updated: Optimized for multi-shot learning
-        top_k=60,  # Updated: Balanced selection for pattern learning
-        stop_sequences=["**EXAMPLE END**", "---", "Additional Notes:"],  # Updated: Example boundaries
-        max_output_tokens=1800
-    )
-    
-    print(f"🌡️ TEMPERATURE: 0.35 | TOP P: 0.88 | TOP K: 60 | STOP: Example boundaries (Contextual adaptation mode)")
-    
-    contents = [types.Content(role="user", parts=[types.Part(text=multi_shot_prompt)])]
-
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.5-pro",
-            contents=contents,
-            config=generate_content_config
-        )
-        response_text = response.output_text if response.output_text else ""
-        
-        # Token usage logging
-        input_tokens = response.usage_metadata.prompt_token_count if hasattr(response, 'usage_metadata') else 0
-        output_tokens = response.usage_metadata.candidates_token_count if hasattr(response, 'usage_metadata') else 0
-        total_tokens = input_tokens + output_tokens
-        
-        print(f"🔢 TOKENS USED - Multi-Shot Analysis:")
-        print(f"   Input Tokens: {input_tokens}")
-        print(f"   Output Tokens: {output_tokens}")
-        print(f"   Total Tokens: {total_tokens}")
-        print(f"   Estimated Cost: ${total_tokens * 0.000002:.6f}")
-        
-        return jsonify({
-            "result": response_text, 
-            "method": "multi-shot",
-            "token_usage": {
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-                "total_tokens": total_tokens
-            }
-        })
-    except Exception as e:
-        return jsonify({"result": "", "error": str(e)}), 500
-
-@app.route("/one-shot-analysis", methods=["POST"])
-def one_shot_analysis():
-    """One-Shot Prompting - Single example for format consistency"""
-    data = request.get_json(force=True)
-    symbol = data.get("symbol")
-    query = data.get("query", "Analyze this stock")
-
-    if not symbol:
-        return jsonify({"error": "Missing 'symbol' in request."}), 400
-
-    context = get_stock_context(symbol)
-    if "error" in context:
-        return jsonify({"error": context["error"]}), 500
-
-    one_shot_prompt = f"""
-You are Saytrix AI, a financial analyst. Analyze stocks using this EXACT format:
-
-**EXAMPLE ANALYSIS:**
-User Query: "Should I invest in RELIANCE?"
-Stock Data: RELIANCE - Current: ₹2,450, 52W High: ₹2,800, 52W Low: ₹2,100
-
-Response:
-📊 **STOCK OVERVIEW**
-RELIANCE is trading at ₹2,450, down 12.5% from its 52-week high of ₹2,800. The stock shows consolidation near support levels.
-
-📈 **TECHNICAL ANALYSIS**
-- Support: ₹2,400 (strong)
-- Resistance: ₹2,600 (immediate)
-- RSI: 45 (neutral zone)
-- Trend: Sideways with bullish undertone
-
-💰 **FUNDAMENTAL INSIGHTS**
-- Market Cap: ₹16.5L Cr
-- P/E Ratio: 12.8x (reasonable)
-- Debt-to-Equity: 0.35 (healthy)
-- Revenue Growth: 8.2% YoY
-
-⚠️ **RISK ASSESSMENT**
-- Oil price volatility impact
-- Regulatory changes in telecom
-- Market sentiment dependency
-
-🎯 **RECOMMENDATION**
-BUY for long-term (12+ months)
-Target: ₹2,800-3,000
-Stop Loss: ₹2,300
-Allocation: 5-8% of portfolio
-
-**NOW ANALYZE:**
-User Query: "{query}"
-Stock Data: {symbol} - Current: ₹{context.get('current_price')}, 52W High: ₹{context.get('high_52')}, 52W Low: ₹{context.get('low_52')}
-
-Provide analysis in the EXACT same format as the example above.
-"""
-
-    # TEMPERATURE UPDATE: Optimized for format consistency
-    # Temperature 0.15 = More consistent format following
-    # TOP P UPDATE: 0.75 = Focused vocabulary for consistent formatting
-    # TOP K UPDATE: 30 = Strict candidate limitation for format control
-    # STOP SEQUENCES: Strict format boundaries for template adherence
-    generate_content_config = types.GenerateContentConfig(
-        temperature=0.15,  # Updated: Enhanced format consistency
-        top_p=0.75,  # Updated: Tighter control for format adherence
-        top_k=30,  # Updated: Minimal candidates for format consistency
-        stop_sequences=["**FORMAT END**", "---", "Disclaimer:"],  # Updated: Format boundaries
-        max_output_tokens=1500
-    )
-    
-    print(f"🌡️ TEMPERATURE: 0.15 | TOP P: 0.75 | TOP K: 30 | STOP: Format boundaries (Format consistency mode)")
-    
-    contents = [types.Content(role="user", parts=[types.Part(text=one_shot_prompt)])]
-
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.5-pro",
-            contents=contents,
-            config=generate_content_config
-        )
-        response_text = response.output_text if response.output_text else ""
-        
-        # Token usage logging
-        input_tokens = response.usage_metadata.prompt_token_count if hasattr(response, 'usage_metadata') else 0
-        output_tokens = response.usage_metadata.candidates_token_count if hasattr(response, 'usage_metadata') else 0
-        total_tokens = input_tokens + output_tokens
-        
-        print(f"🔢 TOKENS USED - One-Shot Analysis:")
-        print(f"   Input Tokens: {input_tokens}")
-        print(f"   Output Tokens: {output_tokens}")
-        print(f"   Total Tokens: {total_tokens}")
-        print(f"   Estimated Cost: ${total_tokens * 0.000002:.6f}")
-        
-        return jsonify({
-            "result": response_text, 
-            "method": "one-shot",
-            "token_usage": {
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-                "total_tokens": total_tokens
-            }
-        })
-    except Exception as e:
-        return jsonify({"result": "", "error": str(e)}), 500
-
-@app.route("/run-evaluation", methods=["POST"])
-def run_evaluation():
-    """Endpoint to trigger evaluation pipeline"""
-    try:
-        from evaluation_pipeline import SaytrixEvaluationPipeline
-        pipeline = SaytrixEvaluationPipeline()
-        results = pipeline.run_evaluation_pipeline()
-        return jsonify(results)
+        symbols = ["NIFTY", "SENSEX", "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS"]
+        market_data_list = []
+        for symbol in symbols:
+            context = get_stock_context(symbol)
+            if "error" not in context:
+                market_data_list.append({
+                    "symbol": symbol,
+                    "name": symbol.replace(".NS", ""),
+                    "price": f"{context['current_price']:,}",
+                    "change": context['price_change']
+                })
+        return jsonify({"market_data": market_data_list})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route("/health", methods=["GET"])
-def health_check():
-    """Health check endpoint with temperature settings info"""
-    return jsonify({
-        "status": "healthy",
-        "service": "Saytrix AI",
-        "version": "1.1.0",  # Updated version
-        "timestamp": datetime.datetime.now().isoformat(),
-        "available_methods": [
-            "chain-of-thought-analysis",
-            "dynamic-analysis", 
-            "multi-shot-analysis",
-            "one-shot-analysis"
-        ],
-        "temperature_settings": {
-            "chain_of_thought": 0.25,
-            "dynamic_analysis": "0.2-0.4 (adaptive)",
-            "multi_shot": 0.35,
-            "one_shot": 0.15
-        },
-        "top_p_settings": {
-            "chain_of_thought": 0.9,
-            "dynamic_analysis": "0.85-0.95 (adaptive)",
-            "multi_shot": 0.88,
-            "one_shot": 0.75
-        },
-        "top_k_settings": {
-            "chain_of_thought": 50,
-            "dynamic_analysis": "40-80 (adaptive)",
-            "multi_shot": 60,
-            "one_shot": 30
-        },
-        "stop_sequences": {
-            "chain_of_thought": ["**END ANALYSIS**", "---", "DISCLAIMER:"],
-            "dynamic_analysis": "Adaptive based on focus",
-            "multi_shot": ["**EXAMPLE END**", "---", "Additional Notes:"],
-            "one_shot": ["**FORMAT END**", "---", "Disclaimer:"]
-        },
-        "optimization": "Temperature, Top P, Top K, and Stop Sequences optimized for each prompting method"
-    })
+@app.route('/stock-analysis', methods=['POST'])
+def stock_analysis():
+    data = request.json
+    symbol = data.get('symbol', '')
+    result = execute_function('get_stock_price', {'symbol': symbol})
+    return jsonify(result)
 
-if __name__ == "__main__":
-    print("🌡️ SAYTRIX AI - FULLY OPTIMIZED VERSION (TEMP | TOP P | TOP K | STOP)")
-    print("📊 Chain of Thought: 0.25 | 0.9 | 50 | Analysis boundaries")
-    print("🔄 Dynamic Analysis: 0.2-0.4 | 0.85-0.95 | 40-80 | Adaptive boundaries")
-    print("📈 Multi-Shot: 0.35 | 0.88 | 60 | Example boundaries")
-    print("🎯 One-Shot: 0.15 | 0.75 | 30 | Format boundaries")
-    print("=" * 50)
-    app.run(debug=True, host="0.0.0.0", port=5000)
+@app.route('/portfolio-calculate', methods=['POST'])
+def portfolio_calculate():
+    data = request.json
+    holdings = data.get('holdings', [])
+    result = execute_function('calculate_portfolio_value', {'holdings': holdings})
+    return jsonify(result)
+
+@app.route('/clear-mode', methods=['POST'])
+@require_auth
+def clear_mode():
+    user_id = request.user_id
+    user_modes[user_id] = None
+    update_user_activity(user_id)
+    return jsonify({'response': 'Mode cleared. You can now use quick actions or ask general questions.'})
+
+@app.route('/analytics/usage', methods=['GET'])
+@require_auth
+def get_user_usage():
+    days = request.args.get('days', 30, type=int)
+    usage = cost_monitor.get_user_usage(request.user_id, days)
+    return jsonify(usage)
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5000)
