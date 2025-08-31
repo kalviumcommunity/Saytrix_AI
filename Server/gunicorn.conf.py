@@ -1,7 +1,8 @@
 # Gunicorn configuration file for production deployment
+import os
 
 # Server socket
-bind = "0.0.0.0:5000"
+bind = "0.0.0.0:" + os.environ.get("PORT", "5000")
 backlog = 2048
 
 # Worker processes
@@ -15,9 +16,11 @@ keepalive = 2
 max_requests = 1000
 max_requests_jitter = 100
 
-# Logging
-accesslog = "logs/access.log"
-errorlog = "logs/error.log"
+# Logging - LOGS TO CONSOLE (STDOUT/STDERR)
+# By removing the log file paths, logs will go to the console,
+# which is the recommended practice for platforms like Render.
+accesslog = "-"
+errorlog = "-"
 loglevel = "info"
 access_log_format = '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s" %(D)s'
 
