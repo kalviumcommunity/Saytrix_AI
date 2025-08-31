@@ -84,7 +84,12 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app, supports_credentials=True)
+CORS(app, 
+     origins=['https://saytrix.netlify.app', 'http://localhost:3000'],
+     supports_credentials=True,
+     allow_headers=['Content-Type', 'Authorization'],
+     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+)
 
 # Authentication Routes
 @app.route('/auth/register', methods=['POST'])
