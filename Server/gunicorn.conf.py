@@ -17,8 +17,8 @@ max_requests = 1000
 max_requests_jitter = 100
 
 # Logging - LOGS TO CONSOLE (STDOUT/STDERR)
-# By removing the log file paths, logs will go to the console,
-# which is the recommended practice for platforms like Render.
+# By setting these to '-', logs will go to the console, which is
+# the recommended practice for platforms like Render.
 accesslog = "-"
 errorlog = "-"
 loglevel = "info"
@@ -29,7 +29,8 @@ proc_name = 'saytrix_ai'
 
 # Server mechanics
 daemon = False
-pidfile = 'logs/gunicorn.pid'
+# Removed pidfile to fix the FileNotFoundError
+# pidfile = 'logs/gunicorn.pid'
 user = None
 group = None
 tmp_upload_dir = None
