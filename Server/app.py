@@ -9,6 +9,7 @@ from auth import auth_manager, require_auth
 from cost_monitor import cost_monitor
 import logging
 import uuid
+import re
 
 # Enhanced Gemini Integration
 try:
@@ -29,7 +30,6 @@ try:
                 return self._fallback_response(message, stock_data)
             
             try:
-                # Closed-world prompt template
                 system_prompt = f"""You are Saytrix AI, a financial assistant. STRICT RULES:
 1. ONLY use data provided below - NEVER invent numbers
 2. If data missing, say "Data not available"
@@ -54,7 +54,7 @@ Respond helpfully using ONLY the provided information:"""
             return f"Symbol: {data.get('symbol')}, Price: ₹{data.get('current_price')}, High: ₹{data.get('high')}, Low: ₹{data.get('low')}, Volume: {data.get('volume')}"
         
         def _fallback_response(self, message: str, stock_data: dict = None) -> str:
-            words = set(message.lower().split())
+            words = set(re.findall(r'\b\w+\b', message.lower()))
             
             if stock_data and 'error' not in stock_data:
                 return f"📊 **{stock_data.get('symbol')} Live Data**\n\n**Price:** ₹{stock_data.get('current_price')}\n**High:** ₹{stock_data.get('high')}\n**Low:** ₹{stock_data.get('low')}\n**Volume:** {stock_data.get('volume')}"
@@ -67,6 +67,9 @@ Respond helpfully using ONLY the provided information:"""
             
             if any(w in words for w in ['market', 'nifty', 'sensex']):
                 return "📈 Check the live market widgets in the sidebar for current market data and trends."
+            
+            if any(w in words for w in ['stock', 'share', 'price']):
+                return "📊 I can help you get stock prices! Try asking about specific stocks or use the sidebar tools!"
             
             return f"I can help with stock analysis, portfolio management, and market insights. Try asking about specific stocks or use the sidebar tools!"
 
@@ -138,10 +141,40 @@ def login():
 def verify_token():
     return jsonify({'valid': True, 'user_id': request.user_id})
 
-# User session modes
-user_modes = {}
+# User session modes - using database for persistence
+class UserModeManager:
+    def __init__(self):
+        self.modes = {}
+    
+    def set_mode(self, user_id, mode):
+        self.modes[user_id] = mode
+        try:
+            db.save_user_mode(user_id, mode)
+        except:
+            pass
+    
+    def get_mode(self, user_id):
+        try:
+            mode = db.get_user_mode(user_id)
+            if mode:
+                self.modes[user_id] = mode
+                return mode
+        except:
+            pass
+        return self.modes.get(user_id, None)
+    
+    def clear_mode(self, user_id):
+        self.modes[user_id] = None
+        try:
+            db.save_user_mode(user_id, None)
+        except:
+            pass
 
-# Chat endpoint
+user_mode_manager = UserModeManager()
+
+# Track user activity for auto-reset
+user_last_activity = {}
+
 @app.route('/chat', methods=['POST'])
 @require_auth
 def chat():
@@ -154,60 +187,45 @@ def chat():
         return jsonify({'error': 'Message is required'}), 400
     
     try:
-        # Get user's current mode (default to None for greeting mode)
-        current_mode = user_modes.get(user_id, None)
+        stock_keywords = {
+            'zomato': 'ZOMATO.NS', 'reliance': 'RELIANCE.NS', 'tcs': 'TCS.NS',
+            'hdfc': 'HDFCBANK.NS', 'infosys': 'INFY.NS', 'infy': 'INFY.NS',
+            'apple': 'AAPL', 'microsoft': 'MSFT', 'tesla': 'TSLA'
+        }
         
-        # Reset to greeting mode if no recent activity
-        if current_mode and not has_recent_activity(user_id):
-            user_modes[user_id] = None
-            current_mode = None
+        message_lower = message.lower()
+        symbol = None
         
-        # Get conversation history
+        words = set(re.findall(r'\b\w+\b', message_lower))
+        
+        for keyword, stock_symbol in stock_keywords.items():
+            if keyword in words:
+                symbol = stock_symbol
+                break
+        
         conversation_history = db.get_conversation_history(user_id, conversation_id, limit=10)
+        
         db.save_message(user_id, conversation_id, 'user', message)
         
         stock_data = None
-        response_text = ""
+        if symbol:
+            stock_data = execute_function('get_stock_price', {'symbol': symbol})
         
-        # Update user activity
-        update_user_activity(user_id)
-        
-        # Check for greetings first - this overrides any active mode
-        if message.lower().strip() in ['hi', 'hello', 'hey']:
-            # Clear any active mode when user greets
-            user_modes[user_id] = None
-            response_text = "Hello! I'm Saytrix AI, your financial assistant. Click a quick action button to get started!"
-        
-        # Only search for stocks if in stock_search mode
-        elif current_mode == 'stock_search':
-            symbol = detect_stock_symbol(message)
-            if symbol:
-                stock_data = execute_function('get_stock_price', {'symbol': symbol})
-                if gemini_chat and gemini_chat.available:
-                    response_text = gemini_chat.get_response(message, stock_data)
-                else:
-                    response_text = format_stock_response(stock_data)
+        try:
+            if gemini_chat and gemini_chat.available:
+                response_text = gemini_chat.get_response(message, stock_data)
             else:
-                response_text = "Please enter a valid stock symbol (e.g., RELIANCE, TCS, AAPL)"
-        
-        elif current_mode == 'portfolio':
-            response_text = "Portfolio mode active. Use the Portfolio Calculator in the sidebar to manage your investments."
-        
-        elif current_mode == 'news':
-            response_text = "News mode active. Check the News widget in the sidebar for latest updates."
-        
-        elif current_mode == 'analysis':
-            response_text = "Analysis mode active. Enter stock symbols for detailed analysis."
-        
-        else:
-            # No active mode - general chat
-            response_text = "I'm here to help! Use the quick action buttons or ask me about stocks and finance."
+                response_text = gemini_chat._fallback_response(message, stock_data)
+        except Exception as e:
+            logger.error(f"Gemini API error: {e}")
+            response_text = gemini_chat._fallback_response(message, stock_data)
         
         db.save_message(user_id, conversation_id, 'ai', response_text)
         
-        # Log usage
-        if stock_data:
-            cost_monitor.log_api_usage(user_id, 'stock_api', f'/stock/{symbol}', 'error' not in (stock_data or {}))
+        if symbol and stock_data and 'error' not in stock_data:
+            cost_monitor.log_api_usage(user_id, 'alpha_vantage', f'/stock/{symbol}', success=True)
+        elif symbol:
+            cost_monitor.log_api_usage(user_id, 'alpha_vantage', f'/stock/{symbol}', success=False)
         
         return jsonify({
             'response': response_text,
@@ -221,43 +239,33 @@ def chat():
         return jsonify({'error': 'Internal server error'}), 500
 
 def detect_stock_symbol(message):
-    """Detect stock symbol only when in stock search mode"""
-    message_upper = message.upper()
-    words = set(message.lower().split())
+    message_upper = message.upper().strip()
+    message_lower = message.lower().strip()
     
-    # Direct symbol detection
     import re
-    symbol_pattern = r'\b([A-Z]{2,10}(?:\.NS|\.BO)?|NIFTY|SENSEX)\b'
-    direct_symbols = re.findall(symbol_pattern, message_upper)
+    if re.match(r'^[A-Z]{2,10}(\.NS|\.BO)?$', message_upper):
+        if not message_upper.endswith(('.NS', '.BO')) and message_upper not in ['NIFTY', 'SENSEX']:
+            return message_upper + '.NS'
+        return message_upper
     
-    if direct_symbols:
-        return direct_symbols[0]
-    
-    # Company name detection
     stock_keywords = {
         'zomato': 'ZOMATO.NS', 'reliance': 'RELIANCE.NS', 'tcs': 'TCS.NS',
         'hdfc': 'HDFCBANK.NS', 'infosys': 'INFY.NS', 'apple': 'AAPL',
         'microsoft': 'MSFT', 'tesla': 'TSLA'
     }
     
-    for keyword, stock_symbol in stock_keywords.items():
-        if keyword in words:
-            return stock_symbol
+    if message_lower in stock_keywords:
+        return stock_keywords[message_lower]
     
-    return None
+    return message_upper if len(message_upper) >= 2 and len(message_upper) <= 10 else None
 
 def format_stock_response(stock_data):
-    """Format stock data response"""
     if not stock_data or 'error' in stock_data:
         return "Unable to fetch stock data. Please try again."
     
     return f"📊 **{stock_data.get('symbol')} Live Data**\n\n**Price:** ₹{stock_data.get('current_price')}\n**High:** ₹{stock_data.get('high')}\n**Low:** ₹{stock_data.get('low')}\n**Volume:** {stock_data.get('volume')}"
 
-# Track user activity for auto-reset
-user_last_activity = {}
-
 def has_recent_activity(user_id):
-    """Check if user has recent activity (within 5 minutes)"""
     from datetime import datetime, timedelta
     last_activity = user_last_activity.get(user_id)
     if not last_activity:
@@ -265,7 +273,6 @@ def has_recent_activity(user_id):
     return datetime.now() - last_activity < timedelta(minutes=5)
 
 def update_user_activity(user_id):
-    """Update user's last activity timestamp"""
     user_last_activity[user_id] = datetime.now()
 
 @app.route('/quick-action', methods=['POST'])
@@ -275,21 +282,20 @@ def quick_action():
     action = data.get('action', '')
     user_id = request.user_id
     
-    # Update user activity
     update_user_activity(user_id)
     
     # Set user mode based on action
     if action == 'stock-search':
-        user_modes[user_id] = 'stock_search'
+        user_mode_manager.set_mode(user_id, 'stock_search')
         response = "🔍 **Stock Search Activated**\n\nEnter a stock symbol (e.g., RELIANCE, TCS, AAPL) to get live data."
     elif action == 'portfolio-review':
-        user_modes[user_id] = 'portfolio'
+        user_mode_manager.set_mode(user_id, 'portfolio')
         response = "💼 **Portfolio Mode Activated**\n\nUse the Portfolio Calculator in the sidebar to manage your investments."
     elif action == 'market-analysis':
-        user_modes[user_id] = 'analysis'
+        user_mode_manager.set_mode(user_id, 'analysis')
         response = "📊 **Analysis Mode Activated**\n\nEnter stock symbols for detailed market analysis."
     elif action == 'news-update':
-        user_modes[user_id] = 'news'
+        user_mode_manager.set_mode(user_id, 'news')
         response = "📰 **News Mode Activated**\n\nCheck the News widget for latest updates or ask about specific stocks."
     else:
         response = 'Action completed successfully.'
@@ -332,7 +338,7 @@ def portfolio_calculate():
 @require_auth
 def clear_mode():
     user_id = request.user_id
-    user_modes[user_id] = None
+    user_mode_manager.clear_mode(user_id)
     update_user_activity(user_id)
     return jsonify({'response': 'Mode cleared. You can now use quick actions or ask general questions.'})
 

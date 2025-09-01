@@ -122,6 +122,27 @@ class Database:
     def get_portfolio(self, user_id: str) -> Optional[Dict[str, Any]]:
         """Get user's portfolio"""
         return self.portfolios.find_one({"user_id": user_id})
+    
+    # User Mode Management
+    def save_user_mode(self, user_id: str, mode: str) -> None:
+        """Save user's current mode"""
+        try:
+            self.users.update_one(
+                {"user_id": user_id},
+                {"$set": {"current_mode": mode, "mode_updated_at": datetime.now()}},
+                upsert=True
+            )
+        except Exception as e:
+            print(f"Error saving user mode: {e}")
+    
+    def get_user_mode(self, user_id: str) -> Optional[str]:
+        """Get user's current mode"""
+        try:
+            user = self.users.find_one({"user_id": user_id})
+            return user.get("current_mode") if user else None
+        except Exception as e:
+            print(f"Error getting user mode: {e}")
+            return None
 
 # Global database instance
 db = Database()

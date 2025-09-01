@@ -13,36 +13,49 @@ axios.interceptors.request.use((config) => {
 })
 
 export const api = {
+  // Authentication
+  login: (email, password) =>
+    axios.post(`${API_BASE}/auth/login`, { email, password }),
+  
+  register: (email, password, name) =>
+    axios.post(`${API_BASE}/auth/register`, { email, password, name }),
+  
+  verifyToken: () =>
+    axios.get(`${API_BASE}/auth/verify`),
+  
+  // Chat
   sendMessage: (message, conversationId) =>
     axios.post(`${API_BASE}/chat`, { message, conversation_id: conversationId }),
   
   quickAction: (action) =>
     axios.post(`${API_BASE}/quick-action`, { action }),
   
+  clearMode: () =>
+    axios.post(`${API_BASE}/clear-mode`),
+  
+  // Market Data
   getMarketData: () =>
     axios.get(`${API_BASE}/market-data`),
   
   analyzeStock: (symbol) =>
     axios.post(`${API_BASE}/stock-analysis`, { symbol }),
   
+  // Portfolio
   calculatePortfolio: (holdings) =>
     axios.post(`${API_BASE}/portfolio-calculate`, { holdings }),
   
-  getConversations: () =>
-    axios.get(`${API_BASE}/conversations`),
-  
-  getConversationHistory: (conversationId) =>
-    axios.get(`${API_BASE}/conversations/${conversationId}/history`),
-  
+  // Analytics
   getUserUsage: (days = 30) =>
     axios.get(`${API_BASE}/analytics/usage?days=${days}`),
   
-  // Direct Alpha Vantage calls (if needed)
-  getStockDirect: (symbol) => {
-    const apiKey = import.meta.env.VITE_ALPHA_VANTAGE_API_KEY
-    if (apiKey) {
-      return axios.get(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${symbol}&apikey=${apiKey}`)
+  // Direct stock data (fallback)
+  getStockDirect: async (symbol) => {
+    try {
+      const response = await axios.post(`${API_BASE}/stock-analysis`, { symbol })
+      return response
+    } catch (error) {
+      console.error('Stock API error:', error)
+      throw error
     }
-    return Promise.reject('No API key')
   }
 }
