@@ -189,8 +189,8 @@ def chat():
     try:
         stock_keywords = {
             'zomato': 'ZOMATO.NS', 'reliance': 'RELIANCE.NS', 'tcs': 'TCS.NS',
-            'hdfc': 'HDFCBANK.NS', 'infosys': 'INFY.NS', 'infy': 'INFY.NS',
-            'apple': 'AAPL', 'microsoft': 'MSFT', 'tesla': 'TSLA'
+            'hdfc': 'HDFCBANK.NS', 'hdfcbank': 'HDFCBANK.NS', 'infosys': 'INFY.NS', 
+            'infy': 'INFY.NS', 'apple': 'AAPL', 'microsoft': 'MSFT', 'tesla': 'TSLA'
         }
         
         message_lower = message.lower()

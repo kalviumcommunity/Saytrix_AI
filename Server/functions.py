@@ -101,14 +101,30 @@ FUNCTION_SCHEMAS = [
 class FunctionExecutor:
     @staticmethod
     def get_stock_price(symbol: str) -> Dict[str, Any]:
-        # Check cache first
-        cache_key = 'stock_price'
-        cached_data = api_cache.get(cache_key, {'symbol': symbol})
-        if cached_data:
-            logger.info(f"Cache hit for {symbol}")
-            return cached_data
+        # Try yfinance first (more reliable)
+        try:
+            ticker = yf.Ticker(symbol)
+            info = ticker.info
+            hist = ticker.history(period="1d")
+            
+            if not hist.empty and info:
+                current_price = hist['Close'].iloc[-1]
+                result = {
+                    "symbol": symbol,
+                    "current_price": round(current_price, 2),
+                    "high": round(hist['High'].iloc[-1], 2),
+                    "low": round(hist['Low'].iloc[-1], 2),
+                    "volume": int(hist['Volume'].iloc[-1]),
+                    "market_cap": info.get('marketCap', 'N/A'),
+                    "pe_ratio": info.get('trailingPE', 'N/A'),
+                    "source": "Yahoo Finance",
+                    "timestamp": datetime.now().isoformat()
+                }
+                return result
+        except Exception as e:
+            logger.error(f"Yahoo Finance error for {symbol}: {e}")
         
-        # Try Alpha Vantage API first
+        # Try Alpha Vantage as fallback
         api_key = os.getenv('ALPHA_VANTAGE_API_KEY')
         if api_key:
             try:
@@ -129,38 +145,30 @@ class FunctionExecutor:
                         "source": "Alpha Vantage",
                         "timestamp": datetime.now().isoformat()
                     }
-                    # Cache successful result
-                    api_cache.set(cache_key, {'symbol': symbol}, result, ttl=60)
                     return result
             except Exception as e:
                 logger.error(f"Alpha Vantage API error for {symbol}: {e}")
         
-        # Fallback to yfinance
-        try:
-            ticker = yf.Ticker(symbol)
-            hist = ticker.history(period="1d")
-            
-            if not hist.empty:
-                current_price = hist['Close'].iloc[-1]
-                result = {
-                    "symbol": symbol,
-                    "current_price": round(current_price, 2),
-                    "high": round(hist['High'].iloc[-1], 2),
-                    "low": round(hist['Low'].iloc[-1], 2),
-                    "volume": int(hist['Volume'].iloc[-1]),
-                    "source": "Yahoo Finance",
-                    "timestamp": datetime.now().isoformat()
-                }
-                # Cache successful result
-                api_cache.set(cache_key, {'symbol': symbol}, result, ttl=60)
-                return result
-        except Exception as e:
-            logger.error(f"Yahoo Finance error for {symbol}: {e}")
+        # Return mock data for demo
+        mock_data = {
+            "ZOMATO.NS": {"current_price": 268.45, "high": 275.20, "low": 265.10, "volume": 12500000},
+            "HDFCBANK.NS": {"current_price": 1654.80, "high": 1670.25, "low": 1645.30, "volume": 8900000},
+            "RELIANCE.NS": {"current_price": 2456.30, "high": 2478.90, "low": 2445.15, "volume": 15600000}
+        }
         
-        error_result = {"error": f"No data found for {symbol}", "symbol": symbol}
-        # Cache error for shorter time to allow retries
-        api_cache.set(cache_key, {'symbol': symbol}, error_result, ttl=10)
-        return error_result
+        if symbol in mock_data:
+            data = mock_data[symbol]
+            return {
+                "symbol": symbol,
+                "current_price": data["current_price"],
+                "high": data["high"],
+                "low": data["low"],
+                "volume": data["volume"],
+                "source": "Demo Data",
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        return {"error": f"No data found for {symbol}", "symbol": symbol}
     
     @staticmethod
     def get_stock_history(symbol: str, period: str) -> Dict[str, Any]:
