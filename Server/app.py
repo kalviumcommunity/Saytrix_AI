@@ -194,14 +194,46 @@ def chat():
         }
         
         message_lower = message.lower()
-        symbol = None
+        symbols = []
         
         words = set(re.findall(r'\b\w+\b', message_lower))
         
+        # Find all matching stock symbols
         for keyword, stock_symbol in stock_keywords.items():
             if keyword in words:
-                symbol = stock_symbol
-                break
+                symbols.append(stock_symbol)
+        
+        # If multiple symbols found, compare them
+        if len(symbols) > 1:
+            comparison_data = []
+            for symbol in symbols:
+                stock_data = execute_function('get_stock_price', {'symbol': symbol})
+                if stock_data and 'error' not in stock_data:
+                    comparison_data.append(stock_data)
+            
+            if comparison_data:
+                comparison_text = "📊 **Stock Comparison**\n\n"
+                for data in comparison_data:
+                    comparison_text += f"**{data['symbol']}**: ₹{data['current_price']} (H: ₹{data['high']}, L: ₹{data['low']})\n"
+                
+                try:
+                    if gemini_chat and gemini_chat.available:
+                        response_text = gemini_chat.get_response(message, {'comparison': comparison_data})
+                    else:
+                        response_text = comparison_text
+                except:
+                    response_text = comparison_text
+                
+                db.save_message(user_id, conversation_id, 'ai', response_text)
+                return jsonify({
+                    'response': response_text,
+                    'conversation_id': conversation_id,
+                    'timestamp': datetime.now().isoformat(),
+                    'user_id': user_id
+                })
+        
+        # Single symbol handling
+        symbol = symbols[0] if symbols else None
         
         conversation_history = db.get_conversation_history(user_id, conversation_id, limit=10)
         
@@ -210,6 +242,11 @@ def chat():
         stock_data = None
         if symbol:
             stock_data = execute_function('get_stock_price', {'symbol': symbol})
+            # Log successful API call
+            if stock_data and 'error' not in stock_data:
+                cost_monitor.log_api_usage(user_id, 'alpha_vantage', f'/stock/{symbol}', success=True)
+            elif symbol:
+                cost_monitor.log_api_usage(user_id, 'alpha_vantage', f'/stock/{symbol}', success=False)
         
         try:
             if gemini_chat and gemini_chat.available:
@@ -222,10 +259,7 @@ def chat():
         
         db.save_message(user_id, conversation_id, 'ai', response_text)
         
-        if symbol and stock_data and 'error' not in stock_data:
-            cost_monitor.log_api_usage(user_id, 'alpha_vantage', f'/stock/{symbol}', success=True)
-        elif symbol:
-            cost_monitor.log_api_usage(user_id, 'alpha_vantage', f'/stock/{symbol}', success=False)
+        # Cost monitoring is now handled above
         
         return jsonify({
             'response': response_text,
